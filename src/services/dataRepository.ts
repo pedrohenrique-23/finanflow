@@ -74,6 +74,7 @@ export function loadLocalState(userId: string): AppDataState {
     theme: 'dark',
     timezone: 'America/Fortaleza',
     currency: 'BRL',
+    onboarding_completed: false,
   };
 
   const profile = load<Profile>('profile', defaultProfile);

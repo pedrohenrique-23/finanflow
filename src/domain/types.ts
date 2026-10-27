@@ -17,6 +17,7 @@ export interface Profile {
   theme: 'dark' | 'light';
   timezone: string; // Default: 'America/Fortaleza'
   currency: 'BRL';
+  onboarding_completed?: boolean;
   created_at?: string;
   updated_at?: string;
 }

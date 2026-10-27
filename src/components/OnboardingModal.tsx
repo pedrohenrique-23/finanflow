@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Sparkles, DollarSign, Calendar, Moon, Sun, ShieldAlert, Check } from 'lucide-react';
+import { Sparkles, DollarSign, Calendar, Moon, Sun, ShieldAlert, Check, X } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { toCents, fromCents, getTodayDateStr } from '../domain/finance';
 
@@ -9,7 +9,7 @@ interface OnboardingModalProps {
 }
 
 export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClose }) => {
-  const { profile, updateProfile, theme, toggleTheme } = useApp();
+  const { profile, completeOnboarding } = useApp();
 
   const [displayName, setDisplayName] = useState(profile.display_name || '');
   const [initialBalanceStr, setInitialBalanceStr] = useState(
@@ -20,6 +20,13 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
   const [errorMsg, setErrorMsg] = useState('');
 
   if (!isOpen) return null;
+
+  const handleDismiss = async () => {
+    await completeOnboarding({
+      onboarding_completed: true,
+    });
+    onClose();
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,11 +40,12 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
 
     const initialBalanceCents = toCents(parsedBalance);
 
-    await updateProfile({
+    await completeOnboarding({
       display_name: displayName.trim() || 'Usuário',
       initial_balance_cents: initialBalanceCents,
       start_date: startDate,
       theme: selectedTheme,
+      onboarding_completed: true,
     });
 
     onClose();
@@ -53,6 +61,15 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
             </div>
             <h2 className="modal-title">Boas-vindas ao FinanFlow</h2>
           </div>
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={handleDismiss}
+            aria-label="Fechar"
+            title="Fechar e configurar depois"
+          >
+            <X size={18} />
+          </button>
         </div>
 
         <form onSubmit={handleSave} className="modal-body">
@@ -151,8 +168,16 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
             </div>
           </div>
 
-          <div className="modal-footer" style={{ margin: '1.25rem -1.5rem -1.5rem -1.5rem' }}>
-            <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>
+          <div className="modal-footer" style={{ margin: '1.25rem -1.5rem -1.5rem -1.5rem', display: 'flex', gap: '0.75rem' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleDismiss}
+              style={{ flex: 1 }}
+            >
+              Pular por enquanto
+            </button>
+            <button type="submit" className="btn btn-primary" style={{ flex: 2 }}>
               <Check size={16} />
               <span>Concluir e Acessar o Dashboard</span>
             </button>

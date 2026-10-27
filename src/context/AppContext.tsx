@@ -49,6 +49,7 @@ interface AppContextType {
   metrics: DashboardMetrics;
   isSupabaseActive: boolean;
   isOnboarded: boolean;
+  completeOnboarding: (updates?: Partial<Profile>) => Promise<void>;
   login: (email: string, pass: string) => Promise<{ success: boolean; error?: string }>;
   register: (email: string, pass: string, name?: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
@@ -94,30 +95,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  // Pre-load local state synchronously to prevent modal flickering on page refresh
+  const initialLocalState = useMemo(() => {
+    const userId = user?.id || 'demo_user';
+    return loadLocalState(userId);
+  }, [user?.id]);
 
-  // Core Data States
-  const [profile, setProfile] = useState<Profile>({
-    id: `prof_${user?.id || 'demo'}`,
-    user_id: user?.id || 'demo_user',
-    display_name: user?.displayName || 'Usuário',
-    initial_balance_cents: 0,
-    start_date: getTodayDateStr(),
-    theme: 'dark',
-    timezone: 'America/Fortaleza',
-    currency: 'BRL',
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => initialLocalState.profile.theme || 'dark');
+
+  // Core Data States initialized synchronously from local state
+  const [profile, setProfile] = useState<Profile>(() => initialLocalState.profile);
+  const [categories, setCategories] = useState<Category[]>(() => initialLocalState.categories);
+  const [creditCards, setCreditCards] = useState<CreditCard[]>(() => initialLocalState.creditCards);
+  const [purchases, setPurchases] = useState<CreditCardPurchase[]>(() => initialLocalState.purchases);
+  const [installments, setInstallments] = useState<Installment[]>(() => initialLocalState.installments);
+  const [invoices, setInvoices] = useState<Invoice[]>(() => initialLocalState.invoices);
+  const [invoicePayments, setInvoicePayments] = useState<InvoicePayment[]>(() => initialLocalState.invoicePayments);
+  const [transactions, setTransactions] = useState<Transaction[]>(() => initialLocalState.transactions);
+  const [recurringRules, setRecurringRules] = useState<RecurringRule[]>(() => initialLocalState.recurringRules);
+  const [recurringOccurrences, setRecurringOccurrences] = useState<RecurringOccurrence[]>(() => initialLocalState.recurringOccurrences);
+  const [budgets, setBudgets] = useState<MonthlyBudget[]>(() => initialLocalState.budgets);
+
+  // Dedicated persistent flag for onboarding status
+  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState<boolean>(() => {
+    try {
+      const userId = user?.id || 'demo_user';
+      if (localStorage.getItem(`finanflow_onboarding_completed_${userId}`) === 'true') return true;
+      if (initialLocalState.profile.onboarding_completed) return true;
+      if (initialLocalState.profile.initial_balance_cents > 0 || initialLocalState.transactions.length > 0) return true;
+    } catch {}
+    return false;
   });
-
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [creditCards, setCreditCards] = useState<CreditCard[]>([]);
-  const [purchases, setPurchases] = useState<CreditCardPurchase[]>([]);
-  const [installments, setInstallments] = useState<Installment[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [invoicePayments, setInvoicePayments] = useState<InvoicePayment[]>([]);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [recurringRules, setRecurringRules] = useState<RecurringRule[]>([]);
-  const [recurringOccurrences, setRecurringOccurrences] = useState<RecurringOccurrence[]>([]);
-  const [budgets, setBudgets] = useState<MonthlyBudget[]>([]);
 
   // Apply theme to DOM
   useEffect(() => {
@@ -553,8 +561,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return copiedCount;
   };
 
+  const completeOnboarding = async (updates?: Partial<Profile>) => {
+    setHasCompletedOnboarding(true);
+    const userId = user?.id || 'demo_user';
+    localStorage.setItem(`finanflow_onboarding_completed_${userId}`, 'true');
+    const newProfile = {
+      ...profile,
+      ...(updates || {}),
+      onboarding_completed: true,
+    };
+    setProfile(newProfile);
+    await DataRepository.saveProfile(newProfile);
+  };
+
   const isSupabaseActive = Boolean(getSupabaseCredentials().isConfigured);
-  const isOnboarded = Boolean(profile.initial_balance_cents > 0 || transactions.length > 0);
+  const isOnboarded = Boolean(
+    hasCompletedOnboarding ||
+    profile.onboarding_completed ||
+    profile.initial_balance_cents > 0 ||
+    transactions.length > 0
+  );
 
   return (
     <AppContext.Provider
@@ -577,6 +603,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         metrics,
         isSupabaseActive,
         isOnboarded,
+        completeOnboarding,
         login,
         register,
         logout,
