@@ -1,0 +1,130 @@
+/* FinanFlow - Credit Card & Invoice CSS */
+
+.credit-card-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1.5rem;
+}
+
+.credit-card-mockup {
+  position: relative;
+  height: 200px;
+  border-radius: var(--radius-xl);
+  padding: 1.5rem;
+  color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 12px 24px -6px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  transition: transform var(--transition-normal);
+}
+
+.credit-card-mockup:hover {
+  transform: translateY(-4px);
+}
+
+.credit-card-mockup::after {
+  content: '';
+  position: absolute;
+  right: -50px;
+  top: -50px;
+  width: 180px;
+  height: 180px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+
+.card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.card-chip {
+  width: 40px;
+  height: 28px;
+  border-radius: var(--radius-xs);
+  background: linear-gradient(135deg, #fbbf24 0%, #d97706 100%);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.card-issuer {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.card-number-masked {
+  font-size: var(--text-lg);
+  font-family: monospace;
+  letter-spacing: 0.15em;
+  margin: 0.5rem 0;
+}
+
+.card-bottom {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.card-holder {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.9;
+}
+
+.card-dates {
+  font-size: var(--text-xs);
+  opacity: 0.9;
+  text-align: right;
+}
+
+/* Card Limits Widget */
+.card-limits-box {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.limit-stat {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: var(--text-sm);
+}
+
+.limit-stat-label {
+  color: var(--text-secondary);
+}
+
+.limit-stat-val {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* Invoice Header & Detail */
+.invoice-detail-card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.invoice-summary-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  padding: 1rem;
+  background-color: var(--bg-surface-elevated);
+  border-radius: var(--radius-lg);
+  margin: 1rem 0;
+}

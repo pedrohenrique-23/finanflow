@@ -1,0 +1,6 @@
+{
+  "name": "FinanFlow - Controle Financeiro Pessoal",
+  "description": "Sistema completo e moderno de controle financeiro pessoal com gestão de receitas, despesas, cartões de crédito, faturas, orçamentos e PWA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

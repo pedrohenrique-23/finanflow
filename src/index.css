@@ -1,0 +1,12 @@
+/**
+ * FinanFlow - Main Stylesheet
+ * Convencional CSS modularizado em arquivos próprios, sem Tailwind CSS.
+ */
+
+@import './styles/variables.css';
+@import './styles/global.css';
+@import './styles/layout.css';
+@import './styles/components.css';
+@import './styles/dashboard.css';
+@import './styles/cards.css';
+@import './styles/transactions.css';

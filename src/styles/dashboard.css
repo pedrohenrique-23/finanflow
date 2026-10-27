@@ -1,0 +1,123 @@
+/* FinanFlow - Dashboard & Views CSS */
+
+.dashboard-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+
+@media (min-width: 1024px) {
+  .metrics-grid-4 {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.quick-actions-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1.25rem;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.dashboard-sections-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+}
+
+@media (min-width: 1024px) {
+  .dashboard-sections-grid {
+    grid-template-columns: 2fr 1fr;
+  }
+}
+
+.charts-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (min-width: 768px) {
+  .charts-row-2 {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.chart-card {
+  height: 340px;
+  display: flex;
+  flex-direction: column;
+}
+
+.chart-wrapper {
+  flex: 1;
+  width: 100%;
+  min-height: 240px;
+}
+
+/* Obligations List (Upcoming Bills) */
+.obligation-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.obligation-item:last-child {
+  border-bottom: none;
+}
+
+.obligation-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.obligation-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-sm);
+}
+
+.obligation-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.obligation-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.obligation-date {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.obligation-amount {
+  text-align: right;
+}
+
+.obligation-val {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-primary);
+}
