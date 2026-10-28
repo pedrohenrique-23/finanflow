@@ -19,7 +19,7 @@ import { PWAInstallButton } from './PWAInstallButton';
 interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
-  onOpenAuth: () => void;
+  onOpenAuth?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onOpenAuth }) => {

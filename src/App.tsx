@@ -19,17 +19,22 @@ import { TransactionModal } from './components/TransactionModal';
 import { AuthModal } from './components/AuthModal';
 import { OnboardingModal } from './components/OnboardingModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { AuthPage } from './pages/AuthPage';
 import { Transaction } from './domain/types';
 
 function MainApp() {
-  const { isOnboarded } = useApp();
+  const { user, isOnboarded } = useApp();
   const [activeTab, setActiveTab] = useState<string>('dashboard');
 
   // Modals state
   const [isTxModalOpen, setIsTxModalOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isOnboardingDismissed, setIsOnboardingDismissed] = useState(false);
+
+  // If user is logged out or not authenticated, protect all private financial data!
+  if (!user) {
+    return <AuthPage />;
+  }
 
   const handleOpenNewTx = () => {
     setEditingTx(null);
@@ -69,7 +74,6 @@ function MainApp() {
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        onOpenAuth={() => setIsAuthModalOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -77,7 +81,6 @@ function MainApp() {
         <Header
           activeTab={activeTab}
           onOpenNewTx={handleOpenNewTx}
-          onOpenAuth={() => setIsAuthModalOpen(true)}
         />
 
         <div className="page-body">
@@ -96,11 +99,6 @@ function MainApp() {
           setEditingTx(null);
         }}
         transactionToEdit={editingTx}
-      />
-
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
       />
 
       {/* Onboarding Dialog for First-Time Users */}

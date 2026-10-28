@@ -228,21 +228,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const login = async (email: string, pass: string): Promise<{ success: boolean; error?: string }> => {
+    // Demo user instant bypass
+    if (email === 'demo@finanflow.app') {
+      const u: AuthUser = {
+        id: 'demo_user',
+        email: 'demo@finanflow.app',
+        displayName: 'Pedro Silva',
+      };
+      setUser(u);
+      localStorage.setItem('finanflow_current_user', JSON.stringify(u));
+      return { success: true };
+    }
+
     const supabase = getSupabaseClient();
     if (supabase) {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
-      if (error) {
-        return { success: false, error: error.message };
-      }
-      if (data.user) {
-        const u: AuthUser = {
-          id: data.user.id,
-          email: data.user.email || email,
-          displayName: data.user.user_metadata?.full_name || email.split('@')[0],
-        };
-        setUser(u);
-        localStorage.setItem('finanflow_current_user', JSON.stringify(u));
-        return { success: true };
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
+        if (error) {
+          return { success: false, error: error.message };
+        }
+        if (data.user) {
+          const u: AuthUser = {
+            id: data.user.id,
+            email: data.user.email || email,
+            displayName: data.user.user_metadata?.full_name || email.split('@')[0],
+          };
+          setUser(u);
+          localStorage.setItem('finanflow_current_user', JSON.stringify(u));
+          return { success: true };
+        }
+      } catch (err) {
+        console.warn('Supabase auth error, falling back to local mode:', err);
       }
     }
 
@@ -260,23 +276,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const register = async (email: string, pass: string, name?: string): Promise<{ success: boolean; error?: string }> => {
     const supabase = getSupabaseClient();
     if (supabase) {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password: pass,
-        options: { data: { full_name: name } },
-      });
-      if (error) {
-        return { success: false, error: error.message };
-      }
-      if (data.user) {
-        const u: AuthUser = {
-          id: data.user.id,
-          email: data.user.email || email,
-          displayName: name || email.split('@')[0],
-        };
-        setUser(u);
-        localStorage.setItem('finanflow_current_user', JSON.stringify(u));
-        return { success: true };
+      try {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password: pass,
+          options: { data: { full_name: name } },
+        });
+        if (error) {
+          return { success: false, error: error.message };
+        }
+        if (data.user) {
+          const u: AuthUser = {
+            id: data.user.id,
+            email: data.user.email || email,
+            displayName: name || email.split('@')[0],
+          };
+          setUser(u);
+          localStorage.setItem('finanflow_current_user', JSON.stringify(u));
+          return { success: true };
+        }
+      } catch (err) {
+        console.warn('Supabase sign-up error, falling back to local mode:', err);
       }
     }
 

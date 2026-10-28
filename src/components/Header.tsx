@@ -7,10 +7,10 @@ import { PWAInstallButton } from './PWAInstallButton';
 interface HeaderProps {
   activeTab: string;
   onOpenNewTx: () => void;
-  onOpenAuth: () => void;
+  onOpenAuth?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ activeTab, onOpenNewTx, onOpenAuth }) => {
+export const Header: React.FC<HeaderProps> = ({ activeTab, onOpenNewTx }) => {
   const { user, theme, toggleTheme } = useApp();
 
   const getPageTitle = () => {
