@@ -30,12 +30,12 @@ export const MonthPicker: React.FC = () => {
         aria-label="Mês anterior"
         title="Mês anterior"
       >
-        <ChevronLeft size={16} />
+        <ChevronLeft size={15} />
       </button>
 
-      <span className="month-label" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-        <Calendar size={14} style={{ color: 'var(--brand-primary)' }} />
-        {formattedLabel}
+      <span className="month-label">
+        <Calendar size={13} style={{ color: 'var(--brand-primary)', flexShrink: 0 }} />
+        <span>{formattedLabel}</span>
       </span>
 
       <button
@@ -44,7 +44,7 @@ export const MonthPicker: React.FC = () => {
         aria-label="Próximo mês"
         title="Próximo mês"
       >
-        <ChevronRight size={16} />
+        <ChevronRight size={15} />
       </button>
     </div>
   );

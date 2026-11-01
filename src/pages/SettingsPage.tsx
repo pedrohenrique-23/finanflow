@@ -12,6 +12,12 @@ import {
   AlertCircle,
   Sparkles,
   Download,
+  User,
+  Lock,
+  Mail,
+  Eye,
+  EyeOff,
+  Save,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
@@ -22,7 +28,7 @@ import {
 import { formatCurrencyBRL, fromCents, toCents } from '../domain/finance';
 
 export const SettingsPage: React.FC = () => {
-  const { profile, updateProfile, theme, toggleTheme, user } = useApp();
+  const { profile, updateProfile, theme, toggleTheme, user, updateUserCredentials } = useApp();
 
   const creds = getSupabaseCredentials();
   const [supabaseUrl, setSupabaseUrl] = useState(creds.url);
@@ -30,11 +36,68 @@ export const SettingsPage: React.FC = () => {
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
 
+  // User profile & security edit state
+  const [profileName, setProfileName] = useState(profile.display_name || user?.displayName || '');
+  const [profileNewPwd, setProfileNewPwd] = useState('');
+  const [profileConfirmPwd, setProfileConfirmPwd] = useState('');
+  const [showProfilePwd, setShowProfilePwd] = useState(false);
+  const [profileFeedback, setProfileFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+
   // Initial balance correction flow
   const [initialBalanceStr, setInitialBalanceStr] = useState(
     String(fromCents(profile.initial_balance_cents))
   );
   const [balanceSavedMsg, setBalanceSavedMsg] = useState(false);
+
+  // Sync profileName if profile changes
+  React.useEffect(() => {
+    if (profile.display_name || user?.displayName) {
+      setProfileName(profile.display_name || user?.displayName || '');
+    }
+  }, [profile.display_name, user?.displayName]);
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProfileFeedback(null);
+    const trimmed = profileName.trim();
+    if (!trimmed) {
+      setProfileFeedback({ type: 'error', message: 'O nome de exibição não pode ficar vazio.' });
+      return;
+    }
+
+    if (profileNewPwd) {
+      if (profileNewPwd.length < 6) {
+        setProfileFeedback({ type: 'error', message: 'A nova senha deve ter no mínimo 6 caracteres.' });
+        return;
+      }
+      if (profileNewPwd !== profileConfirmPwd) {
+        setProfileFeedback({ type: 'error', message: 'A confirmação de senha não confere com a nova senha digitada.' });
+        return;
+      }
+    }
+
+    setIsSavingProfile(true);
+    try {
+      const res = await updateUserCredentials({
+        displayName: trimmed,
+        newPassword: profileNewPwd || undefined,
+      });
+
+      if (!res.success) {
+        setProfileFeedback({ type: 'error', message: res.error || 'Erro ao salvar alterações do perfil.' });
+      } else {
+        setProfileFeedback({ type: 'success', message: res.message || 'Perfil e credenciais atualizados com sucesso!' });
+        setProfileNewPwd('');
+        setProfileConfirmPwd('');
+        setTimeout(() => setProfileFeedback(null), 4000);
+      }
+    } catch (err: any) {
+      setProfileFeedback({ type: 'error', message: err.message || 'Erro inesperado ao salvar perfil.' });
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
 
   // SQL Script display modal
   const [showSqlModal, setShowSqlModal] = useState(false);
@@ -109,6 +172,174 @@ CREATE POLICY "Users can access own profile" ON public.profiles FOR ALL USING (a
         <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
           Gerencie o saldo de abertura, banco de dados Supabase e preferências de exibição
         </p>
+      </div>
+
+      {/* 0. Meu Perfil e Segurança da Conta */}
+      <div className="card" style={{ marginBottom: '1.5rem' }}>
+        <div className="card-header">
+          <div>
+            <h3 className="card-title">
+              <User size={18} style={{ color: 'var(--brand-primary)' }} />
+              <span>Meu Perfil e Segurança da Conta</span>
+            </h3>
+            <span className="card-subtitle">
+              Atualize seu nome de exibição e altere sua senha de acesso
+            </span>
+          </div>
+        </div>
+
+        <form onSubmit={handleSaveProfile}>
+          <div className="form-row form-row-2">
+            <div className="form-group">
+              <label className="form-label" htmlFor="settings-profile-name">
+                Nome de Exibição
+              </label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  id="settings-profile-name"
+                  type="text"
+                  className="form-input"
+                  style={{ paddingLeft: '2.25rem' }}
+                  placeholder="Seu nome"
+                  value={profileName}
+                  onChange={(e) => setProfileName(e.target.value)}
+                  required
+                />
+                <User
+                  size={16}
+                  style={{
+                    position: 'absolute',
+                    left: '0.75rem',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    color: 'var(--text-muted)',
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">E-mail Cadastrado</label>
+              <div
+                className="form-input"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  backgroundColor: 'var(--bg-surface-elevated)',
+                  opacity: 0.85,
+                  cursor: 'not-allowed',
+                }}
+              >
+                <Mail size={16} style={{ color: 'var(--text-muted)' }} />
+                <span>{user?.email || 'demo@finanflow.app'}</span>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '1rem', marginTop: '0.5rem', marginBottom: '1rem' }}>
+            <div style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+              Alterar Senha de Acesso (Opcional)
+            </div>
+
+            <div className="form-row form-row-2">
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label" htmlFor="settings-new-pwd">
+                  Nova Senha
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    id="settings-new-pwd"
+                    type={showProfilePwd ? 'text' : 'password'}
+                    className="form-input"
+                    style={{ paddingLeft: '2.25rem', paddingRight: '2.25rem' }}
+                    placeholder="Mínimo 6 caracteres"
+                    value={profileNewPwd}
+                    onChange={(e) => setProfileNewPwd(e.target.value)}
+                    minLength={6}
+                  />
+                  <Lock
+                    size={16}
+                    style={{
+                      position: 'absolute',
+                      left: '0.75rem',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      color: 'var(--text-muted)',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowProfilePwd(!showProfilePwd)}
+                    style={{
+                      position: 'absolute',
+                      right: '0.75rem',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: 'var(--text-muted)',
+                      padding: 0,
+                    }}
+                    title={showProfilePwd ? 'Ocultar senha' : 'Exibir senha'}
+                  >
+                    {showProfilePwd ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label" htmlFor="settings-confirm-pwd">
+                  Confirmar Nova Senha
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    id="settings-confirm-pwd"
+                    type={showProfilePwd ? 'text' : 'password'}
+                    className="form-input"
+                    style={{ paddingLeft: '2.25rem' }}
+                    placeholder="Repita a nova senha"
+                    value={profileConfirmPwd}
+                    onChange={(e) => setProfileConfirmPwd(e.target.value)}
+                    required={profileNewPwd.length > 0}
+                  />
+                  <Lock
+                    size={16}
+                    style={{
+                      position: 'absolute',
+                      left: '0.75rem',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      color: 'var(--text-muted)',
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: '1rem', marginTop: '1rem' }}>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={isSavingProfile}
+            >
+              <Save size={16} />
+              <span>{isSavingProfile ? 'Salvando...' : 'Salvar Dados do Perfil'}</span>
+            </button>
+          </div>
+
+          {profileFeedback && (
+            <div
+              className={`alert-banner ${profileFeedback.type === 'success' ? 'info' : 'danger'}`}
+              style={{ marginTop: '1rem', padding: '0.65rem 1rem' }}
+            >
+              {profileFeedback.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+              <span>{profileFeedback.message}</span>
+            </div>
+          )}
+        </form>
       </div>
 
       {/* 1. Ajuste do Saldo Inicial de Abertura */}

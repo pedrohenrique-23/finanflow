@@ -54,6 +54,10 @@ interface AppContextType {
   register: (email: string, pass: string, name?: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   updateProfile: (profile: Partial<Profile>) => Promise<void>;
+  updateUserCredentials: (params: {
+    displayName?: string;
+    newPassword?: string;
+  }) => Promise<{ success: boolean; error?: string; message?: string }>;
   addTransaction: (tx: Omit<Transaction, 'id' | 'user_id'>) => Promise<void>;
   updateTransaction: (tx: Transaction) => Promise<void>;
   deleteTransaction: (id: string) => Promise<void>;
@@ -210,9 +214,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [selectedYearMonth, profile.initial_balance_cents, transactions, installments, derivedInvoices, invoicePayments]);
 
   const toggleTheme = () => {
-    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    const nextTheme: 'dark' | 'light' = theme === 'dark' ? 'light' : 'dark';
     setTheme(nextTheme);
-    const updated = { ...profile, theme: nextTheme };
+    const updated: Profile = { ...profile, theme: nextTheme };
     setProfile(updated);
     if (user) {
       DataRepository.saveProfile(updated);
@@ -225,6 +229,70 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (user) {
       await DataRepository.saveProfile(updated);
     }
+  };
+
+  const updateUserCredentials = async (params: {
+    displayName?: string;
+    newPassword?: string;
+  }): Promise<{ success: boolean; error?: string; message?: string }> => {
+    if (!user) {
+      return { success: false, error: 'Usuário não está autenticado.' };
+    }
+
+    const trimmedName = params.displayName?.trim();
+    const newPassword = params.newPassword?.trim();
+
+    if (newPassword && newPassword.length < 6) {
+      return { success: false, error: 'A nova senha deve ter no mínimo 6 caracteres.' };
+    }
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData.session) {
+          const updatePayload: { password?: string; data?: { full_name?: string } } = {};
+          if (newPassword) {
+            updatePayload.password = newPassword;
+          }
+          if (trimmedName) {
+            updatePayload.data = { full_name: trimmedName };
+          }
+
+          if (Object.keys(updatePayload).length > 0) {
+            const { error } = await supabase.auth.updateUser(updatePayload);
+            if (error) {
+              return { success: false, error: error.message };
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn('Supabase updateUser error, updating local state:', err);
+      }
+    }
+
+    // Synchronize local state and storage
+    const nextDisplayName = trimmedName || user.displayName;
+    const updatedUser: AuthUser = {
+      ...user,
+      displayName: nextDisplayName,
+    };
+    setUser(updatedUser);
+    localStorage.setItem('finanflow_current_user', JSON.stringify(updatedUser));
+
+    const updatedProfile: Profile = {
+      ...profile,
+      display_name: nextDisplayName,
+    };
+    setProfile(updatedProfile);
+    await DataRepository.saveProfile(updatedProfile);
+
+    return {
+      success: true,
+      message: newPassword
+        ? 'Dados do perfil e senha atualizados com sucesso!'
+        : 'Nome de exibição atualizado com sucesso!',
+    };
   };
 
   const login = async (email: string, pass: string): Promise<{ success: boolean; error?: string }> => {
@@ -628,6 +696,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         register,
         logout,
         updateProfile,
+        updateUserCredentials,
         addTransaction,
         updateTransaction,
         deleteTransaction,

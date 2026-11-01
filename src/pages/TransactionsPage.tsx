@@ -111,78 +111,214 @@ export const TransactionsPage: React.FC<TransactionsPageProps> = ({ onOpenNewTx,
             />
           </div>
 
-          {/* Type Filter */}
-          <select
-            className="form-select"
-            style={{ width: 'auto' }}
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value as any)}
-          >
-            <option value="all">Todos os Tipos</option>
-            <option value="income">Apenas Receitas</option>
-            <option value="expense">Apenas Despesas</option>
-          </select>
+          {/* Selects Container for responsive mobile layout */}
+          <div className="filters-selects-container">
+            {/* Type Filter */}
+            <select
+              className="form-select"
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value as any)}
+            >
+              <option value="all">Todos os Tipos</option>
+              <option value="income">Apenas Receitas</option>
+              <option value="expense">Apenas Despesas</option>
+            </select>
 
-          {/* Status Filter */}
-          <select
-            className="form-select"
-            style={{ width: 'auto' }}
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value as any)}
-          >
-            <option value="all">Todos os Status</option>
-            <option value="completed">Pagos / Recebidos</option>
-            <option value="pending">Pendentes</option>
-            <option value="overdue">Vencidos</option>
-          </select>
+            {/* Status Filter */}
+            <select
+              className="form-select"
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value as any)}
+            >
+              <option value="all">Todos os Status</option>
+              <option value="completed">Pagos / Recebidos</option>
+              <option value="pending">Pendentes</option>
+              <option value="overdue">Vencidos</option>
+            </select>
 
-          {/* Category Filter */}
-          <select
-            className="form-select"
-            style={{ width: 'auto' }}
-            value={filterCategory}
-            onChange={(e) => setFilterCategory(e.target.value)}
-          >
-            <option value="all">Todas as Categorias</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+            {/* Category Filter */}
+            <select
+              className="form-select"
+              value={filterCategory}
+              onChange={(e) => setFilterCategory(e.target.value)}
+            >
+              <option value="all">Todas as Categorias</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
-        <button onClick={onOpenNewTx} className="btn btn-primary">
+        <button onClick={onOpenNewTx} className="btn btn-primary" style={{ flexShrink: 0 }}>
           <PlusCircle size={16} />
           <span>Novo Lançamento</span>
         </button>
       </div>
 
-      {/* Transactions Table / List */}
+      {/* Transactions Container */}
       <div className="tx-table-container">
         {filteredTransactions.length > 0 ? (
-          <table className="tx-table">
-            <thead>
-              <tr>
-                <th>Descrição & Categoria</th>
-                <th>Data</th>
-                <th>Vencimento</th>
-                <th>Status</th>
-                <th>Forma</th>
-                <th style={{ textAlign: 'right' }}>Valor</th>
-                <th style={{ textAlign: 'right' }}>Ações</th>
-              </tr>
-            </thead>
-            <tbody>
+          <>
+            {/* Desktop Table View (>= 768px) */}
+            <div className="tx-desktop-table-wrap">
+              <table className="tx-table">
+                <thead>
+                  <tr>
+                    <th>Descrição & Categoria</th>
+                    <th>Data</th>
+                    <th>Vencimento</th>
+                    <th>Status</th>
+                    <th>Forma</th>
+                    <th style={{ textAlign: 'right' }}>Valor</th>
+                    <th style={{ textAlign: 'right' }}>Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredTransactions.map((tx) => {
+                    const category = categories.find((c) => c.id === tx.category_id);
+                    const derivedStatus = deriveTransactionStatus(tx);
+                    const isExpense = tx.type === 'expense';
+
+                    return (
+                      <tr key={tx.id}>
+                        <td>
+                          <div className="tx-desc-cell">
+                            <div
+                              className="tx-cat-icon"
+                              style={{
+                                backgroundColor: isExpense ? 'var(--color-expense-bg)' : 'var(--color-income-bg)',
+                                color: isExpense ? 'var(--color-expense)' : 'var(--color-income)',
+                              }}
+                            >
+                              {isExpense ? <ArrowDownLeft size={16} /> : <ArrowUpRight size={16} />}
+                            </div>
+                            <div>
+                              <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                                {tx.description}
+                              </div>
+                              <div className="tx-meta-sub">
+                                {category?.name || 'Sem categoria'}
+                                {tx.is_recurring && (
+                                  <span style={{ marginLeft: '0.4rem', color: 'var(--brand-primary)', display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                                    <Repeat size={11} /> Recorrente
+                                  </span>
+                                )}
+                                {tx.is_invoice_payment && (
+                                  <span style={{ marginLeft: '0.4rem', color: '#8b5cf6', display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                                    <CreditCard size={11} /> Pagamento Fatura
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td>{formatDateBRL(tx.date)}</td>
+
+                        <td>
+                          {tx.due_date ? (
+                            formatDateBRL(tx.due_date)
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)' }}>-</span>
+                          )}
+                        </td>
+
+                        <td>
+                          <button
+                            onClick={() => handleToggleStatus(tx)}
+                            className={`badge ${
+                              derivedStatus === 'completed'
+                                ? 'badge-paid'
+                                : derivedStatus === 'overdue'
+                                ? 'badge-overdue'
+                                : 'badge-pending'
+                            }`}
+                            title="Clique para alternar entre Pago/Recebido e Pendente"
+                          >
+                            {derivedStatus === 'completed' ? (
+                              <>
+                                <CheckCircle size={12} />
+                                <span>{tx.type === 'income' ? 'Recebido' : 'Pago'}</span>
+                              </>
+                            ) : derivedStatus === 'overdue' ? (
+                              <>
+                                <AlertCircle size={12} />
+                                <span>Vencido</span>
+                              </>
+                            ) : (
+                              <>
+                                <Clock size={12} />
+                                <span>Pendente</span>
+                              </>
+                            )}
+                          </button>
+                        </td>
+
+                        <td>
+                          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
+                            {tx.payment_method === 'credit_card'
+                              ? 'Cartão'
+                              : tx.payment_method === 'cash'
+                              ? 'Dinheiro'
+                              : 'Conta'}
+                          </span>
+                        </td>
+
+                        <td
+                          className={`tx-amount-col ${
+                            isExpense ? 'expense' : 'income'
+                          }`}
+                          style={{
+                            color: isExpense ? 'var(--color-expense)' : 'var(--color-income)',
+                            fontSize: 'var(--text-sm)',
+                          }}
+                        >
+                          {isExpense ? '- ' : '+ '}
+                          {formatCurrencyBRL(tx.amount_cents)}
+                        </td>
+
+                        <td className="tx-actions-col">
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.25rem' }}>
+                            <button
+                              onClick={() => onEditTx(tx)}
+                              className="btn-icon"
+                              title="Editar lançamento"
+                              aria-label="Editar"
+                            >
+                              <Edit2 size={15} />
+                            </button>
+                            <button
+                              onClick={() => setTxToDelete(tx)}
+                              className="btn-icon"
+                              title="Excluir lançamento"
+                              aria-label="Excluir"
+                              style={{ color: 'var(--color-expense)' }}
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards View (< 768px) */}
+            <div className="tx-mobile-list" style={{ padding: '0.75rem' }}>
               {filteredTransactions.map((tx) => {
                 const category = categories.find((c) => c.id === tx.category_id);
                 const derivedStatus = deriveTransactionStatus(tx);
                 const isExpense = tx.type === 'expense';
 
                 return (
-                  <tr key={tx.id}>
-                    <td>
-                      <div className="tx-desc-cell">
+                  <div key={`mob-${tx.id}`} className="tx-mobile-card">
+                    <div className="tx-mobile-card-header">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', minWidth: 0 }}>
                         <div
                           className="tx-cat-icon"
                           style={{
@@ -192,38 +328,29 @@ export const TransactionsPage: React.FC<TransactionsPageProps> = ({ onOpenNewTx,
                         >
                           {isExpense ? <ArrowDownLeft size={16} /> : <ArrowUpRight size={16} />}
                         </div>
-                        <div>
-                          <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                            {tx.description}
-                          </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div className="tx-mobile-card-title">{tx.description}</div>
                           <div className="tx-meta-sub">
-                            {category?.name || 'Sem categoria'}
-                            {tx.is_recurring && (
-                              <span style={{ marginLeft: '0.4rem', color: 'var(--brand-primary)', display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                                <Repeat size={11} /> Recorrente
-                              </span>
-                            )}
-                            {tx.is_invoice_payment && (
-                              <span style={{ marginLeft: '0.4rem', color: '#8b5cf6', display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                                <CreditCard size={11} /> Pagamento Fatura
-                              </span>
+                            <span>{category?.name || 'Sem categoria'}</span>
+                            <span>•</span>
+                            <span>{formatDateBRL(tx.date)}</span>
+                            {tx.due_date && tx.due_date !== tx.date && (
+                              <span>(Vence {formatDateBRL(tx.due_date)})</span>
                             )}
                           </div>
                         </div>
                       </div>
-                    </td>
 
-                    <td>{formatDateBRL(tx.date)}</td>
+                      <div
+                        className="tx-mobile-card-amount"
+                        style={{ color: isExpense ? 'var(--color-expense)' : 'var(--color-income)' }}
+                      >
+                        {isExpense ? '- ' : '+ '}
+                        {formatCurrencyBRL(tx.amount_cents)}
+                      </div>
+                    </div>
 
-                    <td>
-                      {tx.due_date ? (
-                        formatDateBRL(tx.due_date)
-                      ) : (
-                        <span style={{ color: 'var(--text-muted)' }}>-</span>
-                      )}
-                    </td>
-
-                    <td>
+                    <div className="tx-mobile-card-footer">
                       <button
                         onClick={() => handleToggleStatus(tx)}
                         className={`badge ${
@@ -233,7 +360,7 @@ export const TransactionsPage: React.FC<TransactionsPageProps> = ({ onOpenNewTx,
                             ? 'badge-overdue'
                             : 'badge-pending'
                         }`}
-                        title="Clique para alternar entre Pago/Recebido e Pendente"
+                        title="Alternar status"
                       >
                         {derivedStatus === 'completed' ? (
                           <>
@@ -252,57 +379,40 @@ export const TransactionsPage: React.FC<TransactionsPageProps> = ({ onOpenNewTx,
                           </>
                         )}
                       </button>
-                    </td>
 
-                    <td>
-                      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
-                        {tx.payment_method === 'credit_card'
-                          ? 'Cartão'
-                          : tx.payment_method === 'cash'
-                          ? 'Dinheiro'
-                          : 'Conta'}
-                      </span>
-                    </td>
-
-                    <td
-                      className={`tx-amount-col ${
-                        isExpense ? 'expense' : 'income'
-                      }`}
-                      style={{
-                        color: isExpense ? 'var(--color-expense)' : 'var(--color-income)',
-                        fontSize: 'var(--text-sm)',
-                      }}
-                    >
-                      {isExpense ? '- ' : '+ '}
-                      {formatCurrencyBRL(tx.amount_cents)}
-                    </td>
-
-                    <td className="tx-actions-col">
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.25rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginRight: '0.4rem' }}>
+                          {tx.payment_method === 'credit_card'
+                            ? 'Cartão'
+                            : tx.payment_method === 'cash'
+                            ? 'Dinheiro'
+                            : 'Conta'}
+                        </span>
                         <button
                           onClick={() => onEditTx(tx)}
                           className="btn-icon"
-                          title="Editar lançamento"
-                          aria-label="Editar"
+                          title="Editar"
+                          aria-label="Editar lançamento"
+                          style={{ padding: '0.35rem' }}
                         >
                           <Edit2 size={15} />
                         </button>
                         <button
                           onClick={() => setTxToDelete(tx)}
                           className="btn-icon"
-                          title="Excluir lançamento"
-                          aria-label="Excluir"
-                          style={{ color: 'var(--color-expense)' }}
+                          title="Excluir"
+                          aria-label="Excluir lançamento"
+                          style={{ color: 'var(--color-expense)', padding: '0.35rem' }}
                         >
                           <Trash2 size={15} />
                         </button>
                       </div>
-                    </td>
-                  </tr>
+                    </div>
+                  </div>
                 );
               })}
-            </tbody>
-          </table>
+            </div>
+          </>
         ) : (
           <div className="empty-state">
             <p className="empty-title">Nenhum lançamento encontrado</p>

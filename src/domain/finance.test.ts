@@ -240,7 +240,7 @@ test('Cenário 10: Recorrência já confirmada bloqueia geração de duplicata p
       id: `${ruleId}_${yearMonth}`,
       user_id: 'user-1',
       rule_id: ruleId,
-      yearMonth: '2026-10',
+      year_month: '2026-10',
       expected_date: '2026-10-05',
       amount_cents: toCents(1200),
       status: 'confirmed',

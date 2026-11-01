@@ -464,6 +464,6 @@ export function isRecurrenceAlreadyConfirmed(
   existingOccurrences: RecurringOccurrence[]
 ): boolean {
   return existingOccurrences.some(
-    (occ) => occ.rule_id === ruleId && occ.yearMonth === yearMonth && occ.status === 'confirmed'
+    (occ) => occ.rule_id === ruleId && occ.year_month === yearMonth && occ.status === 'confirmed'
   );
 }

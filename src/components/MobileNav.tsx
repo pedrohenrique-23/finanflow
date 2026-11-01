@@ -28,6 +28,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({ activeTab, setActiveTab })
     {
       id: 'recurring',
       label: 'Recorrentes',
+      shortLabel: 'Recorr.',
       icon: Repeat,
       badge: pendingRecurringCount > 0,
     },
@@ -63,7 +64,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({ activeTab, setActiveTab })
                 />
               )}
             </div>
-            <span>{item.label}</span>
+            <span>{item.shortLabel || item.label}</span>
           </button>
         );
       })}

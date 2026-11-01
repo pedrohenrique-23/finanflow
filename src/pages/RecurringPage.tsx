@@ -10,6 +10,7 @@ import {
   ArrowUpRight,
   ShieldCheck,
   Edit3,
+  X,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { RecurringRule, RecurrenceFrequency, TransactionType } from '../domain/types';
@@ -292,120 +293,137 @@ export const RecurringPage: React.FC = () => {
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3 className="modal-title">Cadastrar Lançamento Recorrente</h3>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setIsNewRuleModalOpen(false)}
+                aria-label="Fechar"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                <X size={18} />
+              </button>
             </div>
-            <form onSubmit={handleCreateRule} className="modal-body">
-              {errorMsg && <div className="alert-banner danger">{errorMsg}</div>}
+            <form onSubmit={handleCreateRule} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+              <div className="modal-body">
+                {errorMsg && <div className="alert-banner danger">{errorMsg}</div>}
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1.25rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setType('expense')}
-                  className="btn"
-                  style={{
-                    backgroundColor: type === 'expense' ? 'var(--color-expense-bg)' : 'var(--bg-surface-elevated)',
-                    border: '1px solid',
-                    borderColor: type === 'expense' ? 'var(--color-expense)' : 'var(--border-subtle)',
-                    color: type === 'expense' ? 'var(--color-expense)' : 'var(--text-secondary)',
-                    fontWeight: 700,
-                  }}
-                >
-                  <ArrowDownLeft size={16} />
-                  <span>Despesa Fixa</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setType('income')}
-                  className="btn"
-                  style={{
-                    backgroundColor: type === 'income' ? 'var(--color-income-bg)' : 'var(--bg-surface-elevated)',
-                    border: '1px solid',
-                    borderColor: type === 'income' ? 'var(--color-income)' : 'var(--border-subtle)',
-                    color: type === 'income' ? 'var(--color-income)' : 'var(--text-secondary)',
-                    fontWeight: 700,
-                  }}
-                >
-                  <ArrowUpRight size={16} />
-                  <span>Receita Recorrente</span>
-                </button>
-              </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setType('expense')}
+                    className="btn"
+                    style={{
+                      backgroundColor: type === 'expense' ? 'var(--color-expense-bg)' : 'var(--bg-surface-elevated)',
+                      border: '1px solid',
+                      borderColor: type === 'expense' ? 'var(--color-expense)' : 'var(--border-subtle)',
+                      color: type === 'expense' ? 'var(--color-expense)' : 'var(--text-secondary)',
+                      fontWeight: 700,
+                      padding: '0.6rem 0.4rem',
+                      fontSize: 'var(--text-xs)',
+                      minWidth: 0,
+                    }}
+                  >
+                    <ArrowDownLeft size={16} style={{ flexShrink: 0 }} />
+                    <span>Despesa Fixa</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setType('income')}
+                    className="btn"
+                    style={{
+                      backgroundColor: type === 'income' ? 'var(--color-income-bg)' : 'var(--bg-surface-elevated)',
+                      border: '1px solid',
+                      borderColor: type === 'income' ? 'var(--color-income)' : 'var(--border-subtle)',
+                      color: type === 'income' ? 'var(--color-income)' : 'var(--text-secondary)',
+                      fontWeight: 700,
+                      padding: '0.6rem 0.4rem',
+                      fontSize: 'var(--text-xs)',
+                      minWidth: 0,
+                    }}
+                  >
+                    <ArrowUpRight size={16} style={{ flexShrink: 0 }} />
+                    <span>Receita Fixa</span>
+                  </button>
+                </div>
 
-              <div className="form-group">
-                <label className="form-label" htmlFor="rec-desc">Descrição</label>
-                <input
-                  id="rec-desc"
-                  type="text"
-                  className="form-input"
-                  placeholder="Ex: Aluguel, Salário, Internet Fibra, Netflix"
-                  value={desc}
-                  onChange={(e) => setDesc(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="form-row form-row-2">
                 <div className="form-group">
-                  <label className="form-label" htmlFor="rec-val">Valor Padrão (R$)</label>
+                  <label className="form-label" htmlFor="rec-desc">Descrição</label>
                   <input
-                    id="rec-val"
-                    type="number"
-                    step="0.01"
-                    min="0.01"
+                    id="rec-desc"
+                    type="text"
                     className="form-input"
-                    placeholder="1200,00"
-                    value={amountStr}
-                    onChange={(e) => setAmountStr(e.target.value)}
+                    placeholder="Ex: Aluguel, Salário, Internet Fibra, Netflix"
+                    value={desc}
+                    onChange={(e) => setDesc(e.target.value)}
                     required
                   />
                 </div>
 
-                <div className="form-group">
-                  <label className="form-label" htmlFor="rec-cat">Categoria</label>
-                  <select
-                    id="rec-cat"
-                    className="form-select"
-                    value={categoryId}
-                    onChange={(e) => setCategoryId(e.target.value)}
-                  >
-                    {categories.filter((c) => c.type === type).map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                <div className="form-row form-row-2">
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="rec-val">Valor Padrão (R$)</label>
+                    <input
+                      id="rec-val"
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      className="form-input"
+                      placeholder="1200,00"
+                      value={amountStr}
+                      onChange={(e) => setAmountStr(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="rec-cat">Categoria</label>
+                    <select
+                      id="rec-cat"
+                      className="form-select"
+                      value={categoryId}
+                      onChange={(e) => setCategoryId(e.target.value)}
+                    >
+                      {categories.filter((c) => c.type === type).map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="form-row form-row-2">
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="rec-day">Dia do Mês para Vencimento</label>
+                    <input
+                      id="rec-day"
+                      type="number"
+                      min="1"
+                      max="31"
+                      className="form-input"
+                      value={dayOfMonth}
+                      onChange={(e) => setDayOfMonth(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="rec-freq">Frequência</label>
+                    <select
+                      id="rec-freq"
+                      className="form-select"
+                      value={frequency}
+                      onChange={(e) => setFrequency(e.target.value as any)}
+                    >
+                      <option value="monthly">Mensal</option>
+                      <option value="weekly">Semanal</option>
+                      <option value="yearly">Anual</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 
-              <div className="form-row form-row-2">
-                <div className="form-group">
-                  <label className="form-label" htmlFor="rec-day">Dia do Mês para Vencimento</label>
-                  <input
-                    id="rec-day"
-                    type="number"
-                    min="1"
-                    max="31"
-                    className="form-input"
-                    value={dayOfMonth}
-                    onChange={(e) => setDayOfMonth(e.target.value)}
-                    required
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label" htmlFor="rec-freq">Frequência</label>
-                  <select
-                    id="rec-freq"
-                    className="form-select"
-                    value={frequency}
-                    onChange={(e) => setFrequency(e.target.value as any)}
-                  >
-                    <option value="monthly">Mensal</option>
-                    <option value="weekly">Semanal</option>
-                    <option value="yearly">Anual</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="modal-footer" style={{ margin: '1rem -1.5rem -1.5rem -1.5rem' }}>
+              <div className="modal-footer">
                 <button type="button" className="btn btn-secondary" onClick={() => setIsNewRuleModalOpen(false)}>
                   Cancelar
                 </button>

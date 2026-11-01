@@ -16,8 +16,8 @@ import { BudgetsPage } from './pages/BudgetsPage';
 import { CategoriesPage } from './pages/CategoriesPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TransactionModal } from './components/TransactionModal';
-import { AuthModal } from './components/AuthModal';
 import { OnboardingModal } from './components/OnboardingModal';
+import { ProfileEditModal } from './components/ProfileEditModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { AuthPage } from './pages/AuthPage';
 import { Transaction } from './domain/types';
@@ -29,6 +29,7 @@ function MainApp() {
   // Modals state
   const [isTxModalOpen, setIsTxModalOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
+  const [isProfileEditModalOpen, setIsProfileEditModalOpen] = useState(false);
   const [isOnboardingDismissed, setIsOnboardingDismissed] = useState(false);
 
   // If user is logged out or not authenticated, protect all private financial data!
@@ -74,6 +75,7 @@ function MainApp() {
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
+        onOpenProfileEdit={() => setIsProfileEditModalOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -81,6 +83,7 @@ function MainApp() {
         <Header
           activeTab={activeTab}
           onOpenNewTx={handleOpenNewTx}
+          onOpenProfileEdit={() => setIsProfileEditModalOpen(true)}
         />
 
         <div className="page-body">
@@ -99,6 +102,12 @@ function MainApp() {
           setEditingTx(null);
         }}
         transactionToEdit={editingTx}
+      />
+
+      {/* Profile & Security Edit Modal */}
+      <ProfileEditModal
+        isOpen={isProfileEditModalOpen}
+        onClose={() => setIsProfileEditModalOpen(false)}
       />
 
       {/* Onboarding Dialog for First-Time Users */}

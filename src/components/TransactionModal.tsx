@@ -130,9 +130,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="modal-body">
-          {/* Tipo Selector */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1.25rem' }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+          <div className="modal-body">
+            {/* Tipo Selector */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1.25rem' }}>
             <button
               type="button"
               onClick={() => setType('expense')}
@@ -288,17 +289,18 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               onChange={(e) => setNotes(e.target.value)}
             />
           </div>
+        </div>
 
-          <div className="modal-footer" style={{ margin: '1rem -1.5rem -1.5rem -1.5rem' }}>
-            <button type="button" className="btn btn-secondary" onClick={onClose}>
-              Cancelar
-            </button>
-            <button type="submit" className="btn btn-primary">
-              <Check size={16} />
-              <span>{transactionToEdit ? 'Salvar Alterações' : 'Confirmar Lançamento'}</span>
-            </button>
-          </div>
-        </form>
+        <div className="modal-footer">
+          <button type="button" className="btn btn-secondary" onClick={onClose}>
+            Cancelar
+          </button>
+          <button type="submit" className="btn btn-primary">
+            <Check size={16} />
+            <span>{transactionToEdit ? 'Salvar Alterações' : 'Confirmar Lançamento'}</span>
+          </button>
+        </div>
+      </form>
       </div>
     </div>
   );
