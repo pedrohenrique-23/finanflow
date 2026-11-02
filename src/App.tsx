@@ -53,7 +53,7 @@ function MainApp() {
       case 'dashboard':
         return <DashboardPage onOpenNewTx={handleOpenNewTx} onNavigateTab={setActiveTab} />;
       case 'transactions':
-        return <TransactionsPage onOpenNewTx={handleOpenNewTx} onEditTx={handleEditTx} />;
+        return <TransactionsPage onOpenNewTx={handleOpenNewTx} onEditTx={handleEditTx} onNavigateTab={setActiveTab} />;
       case 'cards':
         return <CardsPage onNavigateTab={setActiveTab} />;
       case 'recurring':

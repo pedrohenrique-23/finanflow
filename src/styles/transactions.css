@@ -205,3 +205,62 @@
     grid-column: span 2;
   }
 }
+
+/* Sortable column headers on desktop table */
+.tx-table th.sortable-th {
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.tx-table th.sortable-th:hover {
+  background-color: var(--bg-surface-hover);
+  color: var(--text-primary);
+}
+
+.th-sort-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.sort-icon-active {
+  color: var(--brand-primary);
+  flex-shrink: 0;
+}
+
+.sort-icon-inactive {
+  color: var(--text-muted);
+  opacity: 0.45;
+  flex-shrink: 0;
+}
+
+.sort-select {
+  font-weight: 500;
+}
+
+.badge-invoice {
+  background-color: rgba(139, 92, 246, 0.15);
+  color: #a78bfa;
+  border: 1px solid rgba(139, 92, 246, 0.3);
+}
+
+.btn-pay-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.55rem;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  background-color: var(--brand-primary);
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.btn-pay-action:hover {
+  opacity: 0.9;
+}
+
