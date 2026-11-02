@@ -83,25 +83,58 @@ interface AppContextType {
   reloadAllData: () => Promise<void>;
 }
 
+const getPersistedDisplayName = (userId: string, email: string, fallback: string): string => {
+  try {
+    const byId = localStorage.getItem(`finanflow_display_name_${userId}`);
+    if (byId && byId.trim()) return byId.trim();
+
+    const byEmail = localStorage.getItem(`finanflow_display_name_${email.toLowerCase()}`);
+    if (byEmail && byEmail.trim()) return byEmail.trim();
+
+    const raw = localStorage.getItem('finanflow_registered_accounts');
+    if (raw) {
+      const map = JSON.parse(raw);
+      if (map[userId]?.displayName?.trim()) return map[userId].displayName.trim();
+      if (map[email.toLowerCase()]?.displayName?.trim()) return map[email.toLowerCase()].displayName.trim();
+    }
+
+    const localProfileRaw = localStorage.getItem(`finanflow_data_${userId}_profile`);
+    if (localProfileRaw) {
+      const parsed = JSON.parse(localProfileRaw);
+      if (parsed?.display_name && parsed.display_name !== 'Usuário FinanFlow' && parsed.display_name.trim()) {
+        return parsed.display_name.trim();
+      }
+    }
+  } catch {}
+  return fallback;
+};
+
 const AppContext = createContext<AppContextType | null>(null);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const todayYm = getTodayDateStr().substring(0, 7);
   const [selectedYearMonth, setSelectedYearMonth] = useState<string>(todayYm);
 
-  // Authentication State
+  // Authentication State: Require explicit login; only authenticate if valid stored session exists
   const [user, setUser] = useState<AuthUser | null>(() => {
     try {
       const stored = localStorage.getItem('finanflow_current_user');
-      return stored ? JSON.parse(stored) : { id: 'demo_user', email: 'demo@finanflow.app', displayName: 'Pedro Silva' };
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.id && parsed.email) {
+          const resolvedName = getPersistedDisplayName(parsed.id, parsed.email, parsed.displayName || 'Usuário');
+          return { ...parsed, displayName: resolvedName };
+        }
+      }
+      return null;
     } catch {
-      return { id: 'demo_user', email: 'demo@finanflow.app', displayName: 'Pedro Silva' };
+      return null;
     }
   });
 
   // Pre-load local state synchronously to prevent modal flickering on page refresh
   const initialLocalState = useMemo(() => {
-    const userId = user?.id || 'demo_user';
+    const userId = user?.id || 'guest';
     return loadLocalState(userId);
   }, [user?.id]);
 
@@ -123,7 +156,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Dedicated persistent flag for onboarding status
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState<boolean>(() => {
     try {
-      const userId = user?.id || 'demo_user';
+      const userId = user?.id || 'guest';
       if (localStorage.getItem(`finanflow_onboarding_completed_${userId}`) === 'true') return true;
       if (initialLocalState.profile.onboarding_completed) return true;
       if (initialLocalState.profile.initial_balance_cents > 0 || initialLocalState.transactions.length > 0) return true;
@@ -140,7 +173,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const reloadAllData = async () => {
     if (!user) return;
     const data = await DataRepository.loadAll(user.id);
-    setProfile(data.profile);
+
+    if (data.profile.onboarding_completed || localStorage.getItem(`finanflow_onboarding_completed_${user.id}`) === 'true') {
+      setHasCompletedOnboarding(true);
+    }
+
+    const resolvedName = getPersistedDisplayName(
+      user.id,
+      user.email,
+      user.displayName || data.profile.display_name || 'Usuário'
+    );
+
+    const syncedProfile: Profile = {
+      ...data.profile,
+      display_name: resolvedName,
+    };
+
+    setProfile(syncedProfile);
     setTheme(data.profile.theme || 'dark');
     setCategories(data.categories);
     setCreditCards(data.creditCards);
@@ -152,6 +201,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setRecurringRules(data.recurringRules);
     setRecurringOccurrences(data.recurringOccurrences);
     setBudgets(data.budgets);
+
+    if (user.displayName !== resolvedName) {
+      const updatedUser: AuthUser = { ...user, displayName: resolvedName };
+      setUser(updatedUser);
+      localStorage.setItem('finanflow_current_user', JSON.stringify(updatedUser));
+    }
   };
 
   useEffect(() => {
@@ -226,6 +281,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateProfile = async (updates: Partial<Profile>) => {
     const updated = { ...profile, ...updates };
     setProfile(updated);
+
+    if (updates.display_name && updates.display_name.trim() && user) {
+      const nextName = updates.display_name.trim();
+      const updatedUser: AuthUser = {
+        ...user,
+        displayName: nextName,
+      };
+      setUser(updatedUser);
+      localStorage.setItem('finanflow_current_user', JSON.stringify(updatedUser));
+      try {
+        localStorage.setItem(`finanflow_display_name_${user.id}`, nextName);
+        localStorage.setItem(`finanflow_display_name_${user.email.toLowerCase()}`, nextName);
+        const raw = localStorage.getItem('finanflow_registered_accounts');
+        const map = raw ? JSON.parse(raw) : {};
+        map[user.id] = { id: user.id, email: user.email, displayName: nextName };
+        map[user.email.toLowerCase()] = { id: user.id, email: user.email, displayName: nextName };
+        localStorage.setItem('finanflow_registered_accounts', JSON.stringify(map));
+      } catch {}
+    }
+
     if (user) {
       await DataRepository.saveProfile(updated);
     }
@@ -280,6 +355,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setUser(updatedUser);
     localStorage.setItem('finanflow_current_user', JSON.stringify(updatedUser));
 
+    // Save persistent keys for future sessions
+    try {
+      localStorage.setItem(`finanflow_display_name_${user.id}`, nextDisplayName);
+      localStorage.setItem(`finanflow_display_name_${user.email.toLowerCase()}`, nextDisplayName);
+      const raw = localStorage.getItem('finanflow_registered_accounts');
+      const map = raw ? JSON.parse(raw) : {};
+      map[user.id] = { id: user.id, email: user.email, displayName: nextDisplayName };
+      map[user.email.toLowerCase()] = { id: user.id, email: user.email, displayName: nextDisplayName };
+      localStorage.setItem('finanflow_registered_accounts', JSON.stringify(map));
+    } catch {}
+
     const updatedProfile: Profile = {
       ...profile,
       display_name: nextDisplayName,
@@ -296,12 +382,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const login = async (email: string, pass: string): Promise<{ success: boolean; error?: string }> => {
+    const trimmedEmail = email.trim().toLowerCase();
+
     // Demo user instant bypass
-    if (email === 'demo@finanflow.app') {
+    if (trimmedEmail === 'demo@finanflow.app') {
+      const resolvedName = getPersistedDisplayName('demo_user', 'demo@finanflow.app', 'Pedro Silva');
       const u: AuthUser = {
         id: 'demo_user',
         email: 'demo@finanflow.app',
-        displayName: 'Pedro Silva',
+        displayName: resolvedName,
       };
       setUser(u);
       localStorage.setItem('finanflow_current_user', JSON.stringify(u));
@@ -311,15 +400,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
+        const { data, error } = await supabase.auth.signInWithPassword({ email: trimmedEmail, password: pass });
         if (error) {
           return { success: false, error: error.message };
         }
         if (data.user) {
+          const resolvedName = getPersistedDisplayName(
+            data.user.id,
+            trimmedEmail,
+            data.user.user_metadata?.full_name || trimmedEmail.split('@')[0]
+          );
           const u: AuthUser = {
             id: data.user.id,
-            email: data.user.email || email,
-            displayName: data.user.user_metadata?.full_name || email.split('@')[0],
+            email: data.user.email || trimmedEmail,
+            displayName: resolvedName,
           };
           setUser(u);
           localStorage.setItem('finanflow_current_user', JSON.stringify(u));
@@ -331,10 +425,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     // Local authentication fallback for instant sandbox verification
+    const localUserId = `usr_${trimmedEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    const resolvedName = getPersistedDisplayName(localUserId, trimmedEmail, trimmedEmail.split('@')[0]);
     const u: AuthUser = {
-      id: `usr_${email.replace(/[^a-zA-Z0-9]/g, '_')}`,
-      email,
-      displayName: email.split('@')[0],
+      id: localUserId,
+      email: trimmedEmail,
+      displayName: resolvedName,
     };
     setUser(u);
     localStorage.setItem('finanflow_current_user', JSON.stringify(u));
@@ -342,13 +438,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const register = async (email: string, pass: string, name?: string): Promise<{ success: boolean; error?: string }> => {
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedName = name?.trim() || trimmedEmail.split('@')[0];
+
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
         const { data, error } = await supabase.auth.signUp({
-          email,
+          email: trimmedEmail,
           password: pass,
-          options: { data: { full_name: name } },
+          options: { data: { full_name: trimmedName } },
         });
         if (error) {
           return { success: false, error: error.message };
@@ -356,11 +455,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (data.user) {
           const u: AuthUser = {
             id: data.user.id,
-            email: data.user.email || email,
-            displayName: name || email.split('@')[0],
+            email: data.user.email || trimmedEmail,
+            displayName: trimmedName,
           };
           setUser(u);
           localStorage.setItem('finanflow_current_user', JSON.stringify(u));
+          try {
+            localStorage.setItem(`finanflow_display_name_${u.id}`, trimmedName);
+            localStorage.setItem(`finanflow_display_name_${trimmedEmail}`, trimmedName);
+            const raw = localStorage.getItem('finanflow_registered_accounts');
+            const map = raw ? JSON.parse(raw) : {};
+            map[u.id] = { id: u.id, email: u.email, displayName: trimmedName };
+            map[trimmedEmail] = { id: u.id, email: u.email, displayName: trimmedName };
+            localStorage.setItem('finanflow_registered_accounts', JSON.stringify(map));
+          } catch {}
           return { success: true };
         }
       } catch (err) {
@@ -368,20 +476,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
+    const localUserId = `usr_${trimmedEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
     const u: AuthUser = {
-      id: `usr_${email.replace(/[^a-zA-Z0-9]/g, '_')}`,
-      email,
-      displayName: name || email.split('@')[0],
+      id: localUserId,
+      email: trimmedEmail,
+      displayName: trimmedName,
     };
     setUser(u);
     localStorage.setItem('finanflow_current_user', JSON.stringify(u));
+    try {
+      localStorage.setItem(`finanflow_display_name_${localUserId}`, trimmedName);
+      localStorage.setItem(`finanflow_display_name_${trimmedEmail}`, trimmedName);
+      const raw = localStorage.getItem('finanflow_registered_accounts');
+      const map = raw ? JSON.parse(raw) : {};
+      map[localUserId] = { id: localUserId, email: trimmedEmail, displayName: trimmedName };
+      map[trimmedEmail] = { id: localUserId, email: trimmedEmail, displayName: trimmedName };
+      localStorage.setItem('finanflow_registered_accounts', JSON.stringify(map));
+    } catch {}
     return { success: true };
   };
 
   const logout = async () => {
     const supabase = getSupabaseClient();
     if (supabase) {
-      await supabase.auth.signOut();
+      try {
+        await supabase.auth.signOut();
+      } catch {}
     }
     localStorage.removeItem('finanflow_current_user');
     setUser(null);
@@ -651,14 +771,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const completeOnboarding = async (updates?: Partial<Profile>) => {
     setHasCompletedOnboarding(true);
-    const userId = user?.id || 'demo_user';
+    const userId = user?.id || 'guest';
     localStorage.setItem(`finanflow_onboarding_completed_${userId}`, 'true');
+
+    const nextName = updates?.display_name?.trim() || profile.display_name;
+
     const newProfile = {
       ...profile,
       ...(updates || {}),
+      display_name: nextName,
       onboarding_completed: true,
     };
     setProfile(newProfile);
+
+    if (user && nextName) {
+      const updatedUser: AuthUser = {
+        ...user,
+        displayName: nextName,
+      };
+      setUser(updatedUser);
+      localStorage.setItem('finanflow_current_user', JSON.stringify(updatedUser));
+      try {
+        localStorage.setItem(`finanflow_display_name_${user.id}`, nextName);
+        localStorage.setItem(`finanflow_display_name_${user.email.toLowerCase()}`, nextName);
+        const raw = localStorage.getItem('finanflow_registered_accounts');
+        const map = raw ? JSON.parse(raw) : {};
+        map[user.id] = { id: user.id, email: user.email, displayName: nextName };
+        map[user.email.toLowerCase()] = { id: user.id, email: user.email, displayName: nextName };
+        localStorage.setItem('finanflow_registered_accounts', JSON.stringify(map));
+      } catch {}
+    }
+
     await DataRepository.saveProfile(newProfile);
   };
 

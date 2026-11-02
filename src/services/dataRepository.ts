@@ -65,10 +65,23 @@ export function loadLocalState(userId: string): AppDataState {
     }
   };
 
+  const savedCustomName = (() => {
+    try {
+      const byId = localStorage.getItem(`finanflow_display_name_${userId}`);
+      if (byId && byId.trim()) return byId.trim();
+      const rawAccounts = localStorage.getItem('finanflow_registered_accounts');
+      if (rawAccounts) {
+        const map = JSON.parse(rawAccounts);
+        if (map[userId]?.displayName?.trim()) return map[userId].displayName.trim();
+      }
+    } catch {}
+    return null;
+  })();
+
   const defaultProfile: Profile = {
     id: `prof_${userId}`,
     user_id: userId,
-    display_name: 'Usuário FinanFlow',
+    display_name: savedCustomName || (userId === 'demo_user' ? 'Pedro Silva' : 'Usuário'),
     initial_balance_cents: 0,
     start_date: new Date().toISOString().split('T')[0],
     theme: 'dark',
@@ -78,6 +91,9 @@ export function loadLocalState(userId: string): AppDataState {
   };
 
   const profile = load<Profile>('profile', defaultProfile);
+  if (savedCustomName && profile.display_name !== savedCustomName) {
+    profile.display_name = savedCustomName;
+  }
 
   // Initialize categories if empty
   let categories = load<Category[]>('categories', []);
@@ -178,6 +194,11 @@ export const DataRepository = {
 
   async saveProfile(profile: Profile): Promise<void> {
     saveLocalEntity(profile.user_id, 'profile', profile);
+    try {
+      if (profile.display_name && profile.display_name.trim()) {
+        localStorage.setItem(`finanflow_display_name_${profile.user_id}`, profile.display_name.trim());
+      }
+    } catch {}
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
