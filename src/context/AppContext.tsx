@@ -39,6 +39,7 @@ interface AppContextType {
   setSelectedYearMonth: (ym: string) => void;
   categories: Category[];
   creditCards: CreditCard[];
+  purchases: CreditCardPurchase[];
   transactions: Transaction[];
   installments: Installment[];
   invoices: Invoice[];
@@ -71,11 +72,24 @@ interface AppContextType {
     installmentsCount: number;
     notes?: string;
   }) => Promise<void>;
+  updatePurchase: (params: {
+    purchaseId: string;
+    cardId?: string;
+    description: string;
+    totalAmountCents: number;
+    purchaseDate: string;
+    categoryId: string;
+    installmentsCount: number;
+    notes?: string;
+  }) => Promise<void>;
+  deletePurchase: (purchaseId: string) => Promise<void>;
   payInvoice: (invoice: Invoice, amountCents: number, paymentDate: string, notes?: string) => Promise<void>;
   addCategory: (cat: Omit<Category, 'id' | 'user_id' | 'is_default' | 'is_archived'>) => Promise<void>;
   updateCategory: (cat: Category) => Promise<void>;
   archiveCategory: (catId: string, replacementCatId?: string) => Promise<void>;
   addRecurringRule: (rule: Omit<RecurringRule, 'id' | 'user_id'>) => Promise<void>;
+  updateRecurringRule: (rule: RecurringRule) => Promise<void>;
+  deleteRecurringRule: (ruleId: string) => Promise<void>;
   confirmRecurringOccurrence: (ruleId: string, yearMonth: string, amountCents?: number) => Promise<void>;
   dismissRecurringOccurrence: (ruleId: string, yearMonth: string) => Promise<void>;
   saveBudget: (categoryId: string, yearMonth: string, limitCents: number) => Promise<void>;
@@ -571,6 +585,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setInstallments(res.installments);
   };
 
+  const updatePurchase = async (params: {
+    purchaseId: string;
+    cardId?: string;
+    description: string;
+    totalAmountCents: number;
+    purchaseDate: string;
+    categoryId: string;
+    installmentsCount: number;
+    notes?: string;
+  }) => {
+    if (!user) return;
+    const existing = purchases.find((p) => p.id === params.purchaseId);
+    if (!existing) return;
+    const cardId = params.cardId || existing.card_id;
+    const card = creditCards.find((c) => c.id === cardId);
+    if (!card) return;
+
+    const res = await DataRepository.updateCreditCardPurchase({
+      userId: user.id,
+      card,
+      purchaseId: params.purchaseId,
+      description: params.description,
+      totalAmountCents: params.totalAmountCents,
+      purchaseDate: params.purchaseDate,
+      categoryId: params.categoryId,
+      installmentsCount: params.installmentsCount,
+      notes: params.notes,
+      existingPurchases: purchases,
+      existingInstallments: installments,
+    });
+
+    setPurchases(res.purchases);
+    setInstallments(res.installments);
+  };
+
+  const deletePurchase = async (purchaseId: string) => {
+    if (!user) return;
+    const res = await DataRepository.deleteCreditCardPurchase({
+      userId: user.id,
+      purchaseId,
+      existingPurchases: purchases,
+      existingInstallments: installments,
+    });
+
+    setPurchases(res.purchases);
+    setInstallments(res.installments);
+  };
+
   const payInvoice = async (invoice: Invoice, amountCents: number, paymentDate: string, notes?: string) => {
     if (!user) return;
     const res = await DataRepository.recordInvoicePayment({
@@ -634,9 +696,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: `rule_${Date.now()}`,
       user_id: user.id,
     };
-    const updated = [...recurringRules, newRule];
+    const updated = await DataRepository.saveRecurringRule(user.id, newRule, recurringRules);
     setRecurringRules(updated);
-    saveLocalEntity(user.id, 'recurringRules', updated);
+  };
+
+  const updateRecurringRule = async (rule: RecurringRule) => {
+    if (!user) return;
+    const updated = await DataRepository.saveRecurringRule(user.id, rule, recurringRules);
+    setRecurringRules(updated);
+  };
+
+  const deleteRecurringRule = async (ruleId: string) => {
+    if (!user) return;
+    const res = await DataRepository.deleteRecurringRule(user.id, ruleId, recurringRules, recurringOccurrences);
+    setRecurringRules(res.rules);
+    setRecurringOccurrences(res.occurrences);
   };
 
   const confirmRecurringOccurrence = async (ruleId: string, yearMonth: string, customAmountCents?: number) => {
@@ -824,6 +898,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setSelectedYearMonth,
         categories,
         creditCards,
+        purchases,
         transactions,
         installments,
         invoices: derivedInvoices,
@@ -845,11 +920,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteTransaction,
         addCard,
         addPurchase,
+        updatePurchase,
+        deletePurchase,
         payInvoice,
         addCategory,
         updateCategory,
         archiveCategory,
         addRecurringRule,
+        updateRecurringRule,
+        deleteRecurringRule,
         confirmRecurringOccurrence,
         dismissRecurringOccurrence,
         saveBudget,

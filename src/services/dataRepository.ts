@@ -340,6 +340,158 @@ export const DataRepository = {
     };
   },
 
+  async updateCreditCardPurchase(params: {
+    userId: string;
+    card: CreditCard;
+    purchaseId: string;
+    description: string;
+    totalAmountCents: number;
+    purchaseDate: string;
+    categoryId: string;
+    installmentsCount: number;
+    notes?: string;
+    existingPurchases: CreditCardPurchase[];
+    existingInstallments: Installment[];
+  }) {
+    const {
+      userId,
+      card,
+      purchaseId,
+      description,
+      totalAmountCents,
+      purchaseDate,
+      categoryId,
+      installmentsCount,
+      notes,
+      existingPurchases,
+      existingInstallments,
+    } = params;
+
+    const existingPurchase = existingPurchases.find((p) => p.id === purchaseId);
+    const updatedPurchase: CreditCardPurchase = {
+      id: purchaseId,
+      user_id: userId,
+      card_id: card.id,
+      description,
+      total_amount_cents: totalAmountCents,
+      purchase_date: purchaseDate,
+      category_id: categoryId,
+      installments_count: installmentsCount,
+      notes,
+      created_at: existingPurchase?.created_at,
+    };
+
+    const newInstallments = generateInstallments({
+      purchaseId,
+      userId,
+      cardId: card.id,
+      totalAmountCents,
+      installmentsCount,
+      purchaseDate,
+      closingDay: card.closing_day,
+      dueDay: card.due_day,
+    });
+
+    const updatedPurchases = existingPurchases.map((p) => (p.id === purchaseId ? updatedPurchase : p));
+    const otherInstallments = existingInstallments.filter((i) => i.purchase_id !== purchaseId);
+    const updatedInstallments = [...otherInstallments, ...newInstallments];
+
+    saveLocalEntity(userId, 'purchases', updatedPurchases);
+    saveLocalEntity(userId, 'installments', updatedInstallments);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.from('credit_card_purchases').upsert(updatedPurchase);
+        await supabase.from('installments').delete().eq('purchase_id', purchaseId);
+        await supabase.from('installments').insert(newInstallments);
+      } catch (e) {
+        console.warn('Supabase purchase update error:', e);
+      }
+    }
+
+    return {
+      purchases: updatedPurchases,
+      installments: updatedInstallments,
+    };
+  },
+
+  async deleteCreditCardPurchase(params: {
+    userId: string;
+    purchaseId: string;
+    existingPurchases: CreditCardPurchase[];
+    existingInstallments: Installment[];
+  }) {
+    const { userId, purchaseId, existingPurchases, existingInstallments } = params;
+
+    const updatedPurchases = existingPurchases.filter((p) => p.id !== purchaseId);
+    const updatedInstallments = existingInstallments.filter((i) => i.purchase_id !== purchaseId);
+
+    saveLocalEntity(userId, 'purchases', updatedPurchases);
+    saveLocalEntity(userId, 'installments', updatedInstallments);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.from('installments').delete().eq('purchase_id', purchaseId);
+        await supabase.from('credit_card_purchases').delete().eq('id', purchaseId);
+      } catch (e) {
+        console.warn('Supabase purchase delete error:', e);
+      }
+    }
+
+    return {
+      purchases: updatedPurchases,
+      installments: updatedInstallments,
+    };
+  },
+
+  async saveRecurringRule(userId: string, rule: RecurringRule, allRules: RecurringRule[]): Promise<RecurringRule[]> {
+    const index = allRules.findIndex((r) => r.id === rule.id);
+    let updated: RecurringRule[];
+    if (index >= 0) {
+      updated = [...allRules];
+      updated[index] = rule;
+    } else {
+      updated = [rule, ...allRules];
+    }
+
+    saveLocalEntity(userId, 'recurringRules', updated);
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.from('recurring_rules').upsert(rule);
+      } catch (e) {
+        console.warn('Supabase recurring rule sync error:', e);
+      }
+    }
+    return updated;
+  },
+
+  async deleteRecurringRule(
+    userId: string,
+    ruleId: string,
+    allRules: RecurringRule[],
+    allOccurrences: RecurringOccurrence[]
+  ): Promise<{ rules: RecurringRule[]; occurrences: RecurringOccurrence[] }> {
+    const updatedRules = allRules.filter((r) => r.id !== ruleId);
+    // Keep confirmed occurrences (which already resulted in transactions) and remove pending/dismissed
+    const updatedOccs = allOccurrences.filter((o) => o.rule_id !== ruleId || o.status === 'confirmed');
+
+    saveLocalEntity(userId, 'recurringRules', updatedRules);
+    saveLocalEntity(userId, 'recurringOccurrences', updatedOccs);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.from('recurring_rules').delete().eq('id', ruleId);
+      } catch (e) {
+        console.warn('Supabase recurring rule delete error:', e);
+      }
+    }
+    return { rules: updatedRules, occurrences: updatedOccs };
+  },
+
   async recordInvoicePayment(params: {
     userId: string;
     invoice: Invoice;

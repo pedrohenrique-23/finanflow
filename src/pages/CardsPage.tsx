@@ -10,9 +10,13 @@ import {
   ChevronRight,
   ShieldCheck,
   Lock,
+  Pencil,
+  Trash2,
+  X,
+  AlertTriangle,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { CreditCard, Installment, Invoice } from '../domain/types';
+import { CreditCard, CreditCardPurchase, Installment, Invoice } from '../domain/types';
 import {
   formatCurrencyBRL,
   formatDateBRL,
@@ -29,12 +33,15 @@ interface CardsPageProps {
 export const CardsPage: React.FC<CardsPageProps> = ({ onNavigateTab }) => {
   const {
     creditCards,
+    purchases,
     installments,
     invoices,
     categories,
     selectedYearMonth,
     addCard,
     addPurchase,
+    updatePurchase,
+    deletePurchase,
     payInvoice,
   } = useApp();
 
@@ -42,6 +49,16 @@ export const CardsPage: React.FC<CardsPageProps> = ({ onNavigateTab }) => {
   const [isNewCardModalOpen, setIsNewCardModalOpen] = useState(false);
   const [isNewPurchaseModalOpen, setIsNewPurchaseModalOpen] = useState(false);
   const [paymentInvoice, setPaymentInvoice] = useState<Invoice | null>(null);
+  const [editingPurchase, setEditingPurchase] = useState<CreditCardPurchase | null>(null);
+  const [deletingPurchase, setDeletingPurchase] = useState<CreditCardPurchase | null>(null);
+
+  // Edit Purchase State
+  const [editDesc, setEditDesc] = useState('');
+  const [editAmountStr, setEditAmountStr] = useState('');
+  const [editDate, setEditDate] = useState('');
+  const [editCategoryId, setEditCategoryId] = useState('');
+  const [editInstallmentsCount, setEditInstallmentsCount] = useState(1);
+  const [editNotes, setEditNotes] = useState('');
 
   // New Card Form State
   const [cardName, setCardName] = useState('');
@@ -192,6 +209,58 @@ export const CardsPage: React.FC<CardsPageProps> = ({ onNavigateTab }) => {
 
     await payInvoice(paymentInvoice, paymentCents, paymentDate, paymentNotes);
     setPaymentInvoice(null);
+  };
+
+  const handleOpenEditPurchase = (purchase: CreditCardPurchase) => {
+    setEditingPurchase(purchase);
+    setEditDesc(purchase.description);
+    setEditAmountStr(String(fromCents(purchase.total_amount_cents)));
+    setEditDate(purchase.purchase_date);
+    setEditCategoryId(purchase.category_id);
+    setEditInstallmentsCount(purchase.installments_count);
+    setEditNotes(purchase.notes || '');
+    setErrorMsg('');
+  };
+
+  const handleSaveEditPurchase = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPurchase) return;
+    setErrorMsg('');
+
+    const amt = parseFloat(editAmountStr.replace(',', '.'));
+    if (isNaN(amt) || amt <= 0) {
+      setErrorMsg('Informe um valor de compra válido.');
+      return;
+    }
+
+    if (!editDesc.trim()) {
+      setErrorMsg('Informe a descrição da compra.');
+      return;
+    }
+
+    await updatePurchase({
+      purchaseId: editingPurchase.id,
+      cardId: editingPurchase.card_id,
+      description: editDesc.trim(),
+      totalAmountCents: toCents(amt),
+      purchaseDate: editDate,
+      categoryId: editCategoryId || editingPurchase.category_id,
+      installmentsCount: Math.max(1, Number(editInstallmentsCount)),
+      notes: editNotes.trim(),
+    });
+
+    setEditingPurchase(null);
+  };
+
+  const handleOpenDeletePurchase = (purchase: CreditCardPurchase) => {
+    setDeletingPurchase(purchase);
+    setErrorMsg('');
+  };
+
+  const handleConfirmDeletePurchase = async () => {
+    if (!deletingPurchase) return;
+    await deletePurchase(deletingPurchase.id);
+    setDeletingPurchase(null);
   };
 
   return (
@@ -450,31 +519,97 @@ export const CardsPage: React.FC<CardsPageProps> = ({ onNavigateTab }) => {
                   <table className="tx-table">
                     <thead>
                       <tr>
+                        <th>Compra / Descrição</th>
+                        <th>Categoria</th>
                         <th>Parcela</th>
                         <th>Vencimento</th>
                         <th>Status</th>
                         <th style={{ textAlign: 'right' }}>Valor da Parcela</th>
+                        <th style={{ textAlign: 'center', width: '90px' }}>Ações</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {currentInvoiceInstallments.map((inst) => (
-                        <tr key={inst.id}>
-                          <td>
-                            <strong>
-                              Parcela {inst.installment_number} de {inst.total_installments}
-                            </strong>
-                          </td>
-                          <td>{formatDateBRL(inst.due_date)}</td>
-                          <td>
-                            <span className={`badge ${inst.is_liquidated ? 'badge-paid' : 'badge-pending'}`}>
-                              {inst.is_liquidated ? 'Liquidada' : 'Aberta'}
-                            </span>
-                          </td>
-                          <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                            {formatCurrencyBRL(inst.amount_cents)}
-                          </td>
-                        </tr>
-                      ))}
+                      {currentInvoiceInstallments.map((inst) => {
+                        const purchase = purchases.find((p) => p.id === inst.purchase_id);
+                        const category = categories.find((c) => c.id === purchase?.category_id);
+                        return (
+                          <tr key={inst.id}>
+                            <td>
+                              <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                                {purchase?.description || 'Compra no cartão'}
+                              </div>
+                              {purchase && (
+                                <div className="tx-meta-sub">
+                                  Feita em {formatDateBRL(purchase.purchase_date)} • Total {formatCurrencyBRL(purchase.total_amount_cents)}
+                                </div>
+                              )}
+                            </td>
+                            <td>
+                              <span
+                                className="badge"
+                                style={{
+                                  backgroundColor: 'var(--bg-surface-elevated)',
+                                  border: '1px solid var(--border-subtle)',
+                                  color: 'var(--text-secondary)',
+                                  fontWeight: 500,
+                                }}
+                              >
+                                {category?.name || 'Geral'}
+                              </span>
+                            </td>
+                            <td>
+                              <strong>
+                                Parcela {inst.installment_number} de {inst.total_installments}
+                              </strong>
+                            </td>
+                            <td>{formatDateBRL(inst.due_date)}</td>
+                            <td>
+                              <span className={`badge ${inst.is_liquidated ? 'badge-paid' : 'badge-pending'}`}>
+                                {inst.is_liquidated ? 'Liquidada' : 'Aberta'}
+                              </span>
+                            </td>
+                            <td style={{ textAlign: 'right', fontWeight: 700 }}>
+                              {formatCurrencyBRL(inst.amount_cents)}
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              {purchase ? (
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditPurchase(purchase)}
+                                    className="btn-icon"
+                                    title="Editar compra completa (valor, parcelas, descrição)"
+                                    style={{
+                                      padding: '0.4rem',
+                                      borderRadius: 'var(--radius-sm)',
+                                      color: 'var(--brand-primary)',
+                                      backgroundColor: 'var(--bg-surface-elevated)',
+                                    }}
+                                  >
+                                    <Pencil size={15} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenDeletePurchase(purchase)}
+                                    className="btn-icon"
+                                    title="Excluir compra e remover todas as suas parcelas"
+                                    style={{
+                                      padding: '0.4rem',
+                                      borderRadius: 'var(--radius-sm)',
+                                      color: 'var(--color-expense)',
+                                      backgroundColor: 'var(--bg-surface-elevated)',
+                                    }}
+                                  >
+                                    <Trash2 size={15} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>-</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -803,6 +938,192 @@ export const CardsPage: React.FC<CardsPageProps> = ({ onNavigateTab }) => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Editar Compra no Cartão */}
+      {editingPurchase && (
+        <div className="modal-overlay" onClick={() => setEditingPurchase(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Editar Compra no Cartão</h3>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setEditingPurchase(null)}
+                aria-label="Fechar"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleSaveEditPurchase} className="modal-body">
+              {errorMsg && <div className="alert-banner danger">{errorMsg}</div>}
+
+              <div className="form-group">
+                <label className="form-label" htmlFor="edit-purch-desc">Descrição da Compra</label>
+                <input
+                  id="edit-purch-desc"
+                  type="text"
+                  className="form-input"
+                  placeholder="Ex: Celular novo, Supermercado, Passagem"
+                  value={editDesc}
+                  onChange={(e) => setEditDesc(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-row form-row-2">
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-purch-amt">Valor Total da Compra (R$)</label>
+                  <input
+                    id="edit-purch-amt"
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    className="form-input"
+                    placeholder="250,00"
+                    value={editAmountStr}
+                    onChange={(e) => setEditAmountStr(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-purch-date">Data da Compra</label>
+                  <input
+                    id="edit-purch-date"
+                    type="date"
+                    className="form-input"
+                    value={editDate}
+                    onChange={(e) => setEditDate(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="form-row form-row-2">
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-purch-inst">Quantidade de Parcelas</label>
+                  <select
+                    id="edit-purch-inst"
+                    className="form-select"
+                    value={editInstallmentsCount}
+                    onChange={(e) => setEditInstallmentsCount(Number(e.target.value))}
+                  >
+                    {Array.from({ length: 48 }, (_, i) => i + 1).map((n) => {
+                      const totalVal = parseFloat(editAmountStr.replace(',', '.')) || 0;
+                      const approxInst = totalVal > 0 ? (totalVal / n).toFixed(2) : '0,00';
+                      return (
+                        <option key={n} value={n}>
+                          {n}x de ~R$ {approxInst} {n === 1 ? '(À vista na fatura)' : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-purch-cat">Categoria</label>
+                  <select
+                    id="edit-purch-cat"
+                    className="form-select"
+                    value={editCategoryId}
+                    onChange={(e) => setEditCategoryId(e.target.value)}
+                  >
+                    {categories.filter((c) => c.type === 'expense').map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label" htmlFor="edit-purch-notes">Observações (Opcional)</label>
+                <input
+                  id="edit-purch-notes"
+                  type="text"
+                  className="form-input"
+                  placeholder="Ex: Compra feita na Amazon, garantia estendida"
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                />
+              </div>
+
+              <div style={{ padding: '0.75rem', backgroundColor: 'var(--bg-surface-elevated)', borderRadius: 'var(--radius-md)', fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
+                <strong>Atenção ao recalcular:</strong> As parcelas desta compra serão redistribuídas a partir da nova data
+                respeitando o dia de fechamento do cartão ({activeCard?.closing_day || 20}) e a soma de centavos exata.
+              </div>
+
+              <div className="modal-footer" style={{ margin: '1rem -1.5rem -1.5rem -1.5rem' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setEditingPurchase(null)}>
+                  Cancelar
+                </button>
+                <button type="submit" className="btn btn-primary">
+                  Salvar Alterações
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmar Exclusão de Compra */}
+      {deletingPurchase && (
+        <div className="modal-overlay" onClick={() => setDeletingPurchase(null)}>
+          <div className="modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--color-expense)' }}>
+                <AlertTriangle size={20} />
+                <h3 className="modal-title" style={{ color: 'var(--color-expense)' }}>Excluir Compra do Cartão</h3>
+              </div>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setDeletingPurchase(null)}
+                aria-label="Fechar"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-primary)', marginBottom: '1rem' }}>
+                Tem certeza que deseja excluir permanentemente a compra <strong>"{deletingPurchase.description}"</strong>?
+              </p>
+
+              <div style={{ padding: '0.85rem', backgroundColor: 'var(--bg-surface-elevated)', borderRadius: 'var(--radius-md)', marginBottom: '1rem', fontSize: 'var(--text-xs)', lineHeight: 1.6 }}>
+                <div>Valor Total: <strong>{formatCurrencyBRL(deletingPurchase.total_amount_cents)}</strong></div>
+                <div>Data: <strong>{formatDateBRL(deletingPurchase.purchase_date)}</strong></div>
+                <div>Parcelas vinculadas: <strong>{deletingPurchase.installments_count} parcela(s)</strong></div>
+              </div>
+
+              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                Esta ação removerá todas as parcelas associadas desta e de faturas futuras, restaurando automaticamente o limite do cartão.
+              </p>
+
+              <div className="modal-footer" style={{ margin: '1.25rem -1.5rem -1.5rem -1.5rem' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setDeletingPurchase(null)}>
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDeletePurchase}
+                  className="btn"
+                  style={{
+                    backgroundColor: 'var(--color-expense)',
+                    color: '#ffffff',
+                    fontWeight: 700,
+                  }}
+                >
+                  <Trash2 size={16} />
+                  <span>Excluir Definitivamente</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

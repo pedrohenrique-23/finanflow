@@ -11,6 +11,9 @@ import {
   ShieldCheck,
   Edit3,
   X,
+  Pencil,
+  Trash2,
+  Settings,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { RecurringRule, RecurrenceFrequency, TransactionType } from '../domain/types';
@@ -23,6 +26,8 @@ export const RecurringPage: React.FC = () => {
     categories,
     selectedYearMonth,
     addRecurringRule,
+    updateRecurringRule,
+    deleteRecurringRule,
     confirmRecurringOccurrence,
     dismissRecurringOccurrence,
   } = useApp();
@@ -31,9 +36,23 @@ export const RecurringPage: React.FC = () => {
   const [adjustingRuleId, setAdjustingRuleId] = useState<string | null>(null);
   const [adjustedAmountStr, setAdjustedAmountStr] = useState('');
 
+  // Edit and Delete Recurring Rule State
+  const [editingRule, setEditingRule] = useState<RecurringRule | null>(null);
+  const [deletingRule, setDeletingRule] = useState<RecurringRule | null>(null);
+
+  // Form State for edit recurring rule
+  const [editRuleDesc, setEditRuleDesc] = useState('');
+  const [editRuleType, setEditRuleType] = useState<'income' | 'expense'>('expense');
+  const [editRuleAmountStr, setEditRuleAmountStr] = useState('');
+  const [editRuleCategoryId, setEditRuleCategoryId] = useState('');
+  const [editRuleFrequency, setEditRuleFrequency] = useState<RecurrenceFrequency>('monthly');
+  const [editRuleDayOfMonth, setEditRuleDayOfMonth] = useState('5');
+  const [editRuleIsActive, setEditRuleIsActive] = useState(true);
+  const [editRuleErrorMsg, setEditRuleErrorMsg] = useState('');
+
   // Form State for new recurring rule
   const [desc, setDesc] = useState('');
-  const [type, setType] = useState<TransactionType>('expense');
+  const [type, setType] = useState<'income' | 'expense'>('expense');
   const [amountStr, setAmountStr] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [frequency, setFrequency] = useState<RecurrenceFrequency>('monthly');
@@ -92,6 +111,66 @@ export const RecurringPage: React.FC = () => {
     setIsNewRuleModalOpen(false);
     setDesc('');
     setAmountStr('');
+  };
+
+  const handleOpenEditRule = (rule: RecurringRule) => {
+    setEditingRule(rule);
+    setEditRuleDesc(rule.description);
+    setEditRuleType(rule.type);
+    setEditRuleAmountStr(String(fromCents(rule.amount_cents)));
+    setEditRuleCategoryId(rule.category_id);
+    setEditRuleFrequency(rule.frequency);
+    setEditRuleDayOfMonth(String(rule.day_of_month));
+    setEditRuleIsActive(rule.is_active);
+    setEditRuleErrorMsg('');
+  };
+
+  const handleSaveEditRule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingRule) return;
+    setEditRuleErrorMsg('');
+
+    const amt = parseFloat(editRuleAmountStr.replace(',', '.'));
+    if (isNaN(amt) || amt <= 0) {
+      setEditRuleErrorMsg('Informe um valor válido maior que zero.');
+      return;
+    }
+
+    if (!editRuleDesc.trim()) {
+      setEditRuleErrorMsg('Informe uma descrição.');
+      return;
+    }
+
+    const day = parseInt(editRuleDayOfMonth, 10);
+    if (isNaN(day) || day < 1 || day > 31) {
+      setEditRuleErrorMsg('Dia de vencimento deve ser entre 1 e 31.');
+      return;
+    }
+
+    const catId = editRuleCategoryId || categories.find((c) => c.type === editRuleType)?.id || 'cat_1';
+
+    await updateRecurringRule({
+      ...editingRule,
+      description: editRuleDesc.trim(),
+      amount_cents: toCents(amt),
+      type: editRuleType,
+      category_id: catId,
+      frequency: editRuleFrequency,
+      day_of_month: day,
+      is_active: editRuleIsActive,
+    });
+
+    setEditingRule(null);
+  };
+
+  const handleOpenDeleteRule = (rule: RecurringRule) => {
+    setDeletingRule(rule);
+  };
+
+  const handleConfirmDeleteRule = async () => {
+    if (!deletingRule) return;
+    await deleteRecurringRule(deletingRule.id);
+    setDeletingRule(null);
   };
 
   const handleConfirmSingle = async (ruleId: string, customCents?: number) => {
@@ -229,43 +308,76 @@ export const RecurringPage: React.FC = () => {
                     </td>
 
                     <td style={{ textAlign: 'right' }}>
-                      {status === 'pending_confirmation' ? (
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.5rem' }}>
-                          <button
-                            onClick={() => handleConfirmSingle(rule.id, amountCents)}
-                            className="btn btn-primary btn-sm"
-                            title="Confirmar lançamento no extrato"
-                          >
-                            <CheckCircle2 size={14} />
-                            <span>Confirmar</span>
-                          </button>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.4rem', flexWrap: 'wrap' }}>
+                        {status === 'pending_confirmation' ? (
+                          <>
+                            <button
+                              onClick={() => handleConfirmSingle(rule.id, amountCents)}
+                              className="btn btn-primary btn-sm"
+                              title="Confirmar lançamento no extrato"
+                            >
+                              <CheckCircle2 size={14} />
+                              <span>Confirmar</span>
+                            </button>
 
+                            <button
+                              onClick={() => {
+                                setAdjustingRuleId(rule.id);
+                                setAdjustedAmountStr(String(fromCents(amountCents)));
+                              }}
+                              className="btn btn-secondary btn-sm"
+                              title="Ajustar valor antes de lançar"
+                            >
+                              <Edit3 size={14} />
+                              <span>Ajustar</span>
+                            </button>
+
+                            <button
+                              onClick={() => handleDismissSingle(rule.id)}
+                              className="btn btn-outline btn-sm"
+                              title="Ignorar neste mês"
+                            >
+                              <XCircle size={14} />
+                              <span>Ignorar</span>
+                            </button>
+                          </>
+                        ) : (
+                          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                            {status === 'confirmed' ? 'Confirmada' : 'Ignorada'}
+                          </span>
+                        )}
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', borderLeft: '1px solid var(--border-subtle)', paddingLeft: '0.4rem', marginLeft: '0.2rem' }}>
                           <button
-                            onClick={() => {
-                              setAdjustingRuleId(rule.id);
-                              setAdjustedAmountStr(String(fromCents(amountCents)));
+                            type="button"
+                            onClick={() => handleOpenEditRule(rule)}
+                            className="btn-icon"
+                            title="Editar regra de recorrência"
+                            style={{
+                              padding: '0.35rem',
+                              borderRadius: 'var(--radius-sm)',
+                              color: 'var(--brand-primary)',
+                              backgroundColor: 'var(--bg-surface-elevated)',
                             }}
-                            className="btn btn-secondary btn-sm"
-                            title="Ajustar valor antes de lançar"
                           >
-                            <Edit3 size={14} />
-                            <span>Ajustar</span>
+                            <Pencil size={14} />
                           </button>
-
                           <button
-                            onClick={() => handleDismissSingle(rule.id)}
-                            className="btn btn-outline btn-sm"
-                            title="Ignorar neste mês"
+                            type="button"
+                            onClick={() => handleOpenDeleteRule(rule)}
+                            className="btn-icon"
+                            title="Excluir regra de recorrência"
+                            style={{
+                              padding: '0.35rem',
+                              borderRadius: 'var(--radius-sm)',
+                              color: 'var(--color-expense)',
+                              backgroundColor: 'var(--bg-surface-elevated)',
+                            }}
                           >
-                            <XCircle size={14} />
-                            <span>Ignorar</span>
+                            <Trash2 size={14} />
                           </button>
                         </div>
-                      ) : (
-                        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-                          {status === 'confirmed' ? 'Lançamento gerado' : 'Ignorado'}
-                        </span>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -286,6 +398,94 @@ export const RecurringPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Configured Rules Section */}
+      {recurringRules.length > 0 && (
+        <div className="card" style={{ marginBottom: '1.5rem' }}>
+          <div className="card-header">
+            <h3 className="card-title">
+              <Settings size={18} style={{ color: 'var(--brand-primary)' }} />
+              <span>Regras de Recorrência Configuradas ({recurringRules.length})</span>
+            </h3>
+            <span className="card-subtitle">
+              Gerencie suas despesas fixas e receitas automáticas. Edite valores base, dia de vencimento ou exclua regras.
+            </span>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem', padding: '1rem' }}>
+            {recurringRules.map((rule) => {
+              const category = categories.find((c) => c.id === rule.category_id);
+              const isExpense = rule.type === 'expense';
+              return (
+                <div
+                  key={rule.id}
+                  style={{
+                    backgroundColor: 'var(--bg-surface-elevated)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-lg)',
+                    padding: '1rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    gap: '0.75rem',
+                  }}
+                >
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
+                      <span className={`badge ${isExpense ? 'badge-expense' : 'badge-income'}`}>
+                        {isExpense ? 'Despesa Fixa' : 'Receita Recorrente'}
+                      </span>
+                      <span
+                        className="badge"
+                        style={{
+                          backgroundColor: rule.is_active ? 'var(--color-income-bg)' : 'var(--bg-surface)',
+                          color: rule.is_active ? 'var(--color-income)' : 'var(--text-muted)',
+                          border: '1px solid var(--border-subtle)',
+                        }}
+                      >
+                        {rule.is_active ? 'Ativa' : 'Pausada'}
+                      </span>
+                    </div>
+
+                    <div style={{ fontWeight: 700, fontSize: 'var(--text-base)', color: 'var(--text-primary)' }}>
+                      {rule.description}
+                    </div>
+
+                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                      {category?.name || 'Geral'} • Todo dia {rule.day_of_month} • {rule.frequency === 'monthly' ? 'Mensal' : rule.frequency === 'weekly' ? 'Semanal' : 'Anual'}
+                    </div>
+
+                    <div style={{ fontSize: 'var(--text-lg)', fontWeight: 800, marginTop: '0.5rem', color: isExpense ? 'var(--color-expense)' : 'var(--color-income)' }}>
+                      {formatCurrencyBRL(rule.amount_cents)}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.5rem', borderTop: '1px solid var(--border-subtle)', paddingTop: '0.75rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEditRule(rule)}
+                      className="btn btn-secondary btn-sm"
+                      style={{ flex: 1, justifyContent: 'center' }}
+                    >
+                      <Pencil size={14} />
+                      <span>Editar</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenDeleteRule(rule)}
+                      className="btn btn-outline btn-sm"
+                      style={{ color: 'var(--color-expense)', borderColor: 'var(--color-expense)', padding: '0.35rem 0.6rem' }}
+                      title="Excluir regra"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Modal: Nova Regra Recorrente */}
       {isNewRuleModalOpen && (
@@ -342,7 +542,7 @@ export const RecurringPage: React.FC = () => {
                     }}
                   >
                     <ArrowUpRight size={16} style={{ flexShrink: 0 }} />
-                    <span>Receita Fixa</span>
+                    <span>Receita Recorrente</span>
                   </button>
                 </div>
 
@@ -432,6 +632,222 @@ export const RecurringPage: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Editar Regra Recorrente */}
+      {editingRule && (
+        <div className="modal-overlay" onClick={() => setEditingRule(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Editar Regra de Recorrência</h3>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setEditingRule(null)}
+                aria-label="Fechar"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleSaveEditRule} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+              <div className="modal-body">
+                {editRuleErrorMsg && <div className="alert-banner danger">{editRuleErrorMsg}</div>}
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setEditRuleType('expense')}
+                    className="btn"
+                    style={{
+                      backgroundColor: editRuleType === 'expense' ? 'var(--color-expense-bg)' : 'var(--bg-surface-elevated)',
+                      border: '1px solid',
+                      borderColor: editRuleType === 'expense' ? 'var(--color-expense)' : 'var(--border-subtle)',
+                      color: editRuleType === 'expense' ? 'var(--color-expense)' : 'var(--text-secondary)',
+                      fontWeight: 700,
+                      padding: '0.6rem 0.4rem',
+                      fontSize: 'var(--text-xs)',
+                      minWidth: 0,
+                    }}
+                  >
+                    <ArrowDownLeft size={16} style={{ flexShrink: 0 }} />
+                    <span>Despesa Fixa</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditRuleType('income')}
+                    className="btn"
+                    style={{
+                      backgroundColor: editRuleType === 'income' ? 'var(--color-income-bg)' : 'var(--bg-surface-elevated)',
+                      border: '1px solid',
+                      borderColor: editRuleType === 'income' ? 'var(--color-income)' : 'var(--border-subtle)',
+                      color: editRuleType === 'income' ? 'var(--color-income)' : 'var(--text-secondary)',
+                      fontWeight: 700,
+                      padding: '0.6rem 0.4rem',
+                      fontSize: 'var(--text-xs)',
+                      minWidth: 0,
+                    }}
+                  >
+                    <ArrowUpRight size={16} style={{ flexShrink: 0 }} />
+                    <span>Receita Recorrente</span>
+                  </button>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-rec-desc">Descrição</label>
+                  <input
+                    id="edit-rec-desc"
+                    type="text"
+                    className="form-input"
+                    value={editRuleDesc}
+                    onChange={(e) => setEditRuleDesc(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-row form-row-2">
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="edit-rec-val">Valor Padrão (R$)</label>
+                    <input
+                      id="edit-rec-val"
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      className="form-input"
+                      value={editRuleAmountStr}
+                      onChange={(e) => setEditRuleAmountStr(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="edit-rec-cat">Categoria</label>
+                    <select
+                      id="edit-rec-cat"
+                      className="form-select"
+                      value={editRuleCategoryId}
+                      onChange={(e) => setEditRuleCategoryId(e.target.value)}
+                    >
+                      {categories.filter((c) => c.type === editRuleType).map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="form-row form-row-2">
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="edit-rec-day">Dia do Mês para Vencimento</label>
+                    <input
+                      id="edit-rec-day"
+                      type="number"
+                      min="1"
+                      max="31"
+                      className="form-input"
+                      value={editRuleDayOfMonth}
+                      onChange={(e) => setEditRuleDayOfMonth(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="edit-rec-freq">Frequência</label>
+                    <select
+                      id="edit-rec-freq"
+                      className="form-select"
+                      value={editRuleFrequency}
+                      onChange={(e) => setEditRuleFrequency(e.target.value as any)}
+                    >
+                      <option value="monthly">Mensal</option>
+                      <option value="weekly">Semanal</option>
+                      <option value="yearly">Anual</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ marginTop: '0.5rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: 'pointer', fontSize: 'var(--text-sm)', color: 'var(--text-primary)' }}>
+                    <input
+                      type="checkbox"
+                      checked={editRuleIsActive}
+                      onChange={(e) => setEditRuleIsActive(e.target.checked)}
+                      style={{ width: '1.1rem', height: '1.1rem', accentColor: 'var(--brand-primary)' }}
+                    />
+                    <span>Regra de recorrência ativa (gera previsões mensalmente)</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setEditingRule(null)}>
+                  Cancelar
+                </button>
+                <button type="submit" className="btn btn-primary">
+                  Salvar Alterações
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmar Exclusão de Regra Recorrente */}
+      {deletingRule && (
+        <div className="modal-overlay" onClick={() => setDeletingRule(null)}>
+          <div className="modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--color-expense)' }}>
+                <AlertTriangle size={20} />
+                <h3 className="modal-title" style={{ color: 'var(--color-expense)' }}>Excluir Recorrência</h3>
+              </div>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setDeletingRule(null)}
+                aria-label="Fechar"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <p style={{ color: 'var(--text-primary)', marginBottom: '0.75rem', fontWeight: 600 }}>
+                Tem certeza que deseja excluir a regra de recorrência "{deletingRule.description}"?
+              </p>
+              <div
+                style={{
+                  padding: '0.75rem 1rem',
+                  backgroundColor: 'var(--bg-surface-elevated)',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-subtle)',
+                  fontSize: 'var(--text-xs)',
+                  color: 'var(--text-muted)',
+                  lineHeight: 1.5,
+                }}
+              >
+                <p>• Ocorrências futuras pendentes não serão mais geradas nos próximos meses.</p>
+                <p style={{ marginTop: '0.25rem' }}>
+                  • Lançamentos que você já <strong>confirmou no extrato</strong> em meses anteriores continuarão registrados e preservados no seu histórico financeiro.
+                </p>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-secondary" onClick={() => setDeletingRule(null)}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ backgroundColor: 'var(--color-expense)', borderColor: 'var(--color-expense)' }}
+                onClick={handleConfirmDeleteRule}
+              >
+                Sim, Excluir Recorrência
+              </button>
+            </div>
           </div>
         </div>
       )}
