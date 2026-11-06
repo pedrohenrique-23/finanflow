@@ -39,6 +39,7 @@ export const CardsPage: React.FC<CardsPageProps> = ({ onNavigateTab }) => {
     categories,
     selectedYearMonth,
     addCard,
+    updateCard,
     addPurchase,
     updatePurchase,
     deletePurchase,
@@ -51,6 +52,15 @@ export const CardsPage: React.FC<CardsPageProps> = ({ onNavigateTab }) => {
   const [paymentInvoice, setPaymentInvoice] = useState<Invoice | null>(null);
   const [editingPurchase, setEditingPurchase] = useState<CreditCardPurchase | null>(null);
   const [deletingPurchase, setDeletingPurchase] = useState<CreditCardPurchase | null>(null);
+
+  // Edit Card State
+  const [editingCard, setEditingCard] = useState<CreditCard | null>(null);
+  const [editCardName, setEditCardName] = useState('');
+  const [editCardIssuer, setEditCardIssuer] = useState('');
+  const [editCardLimitStr, setEditCardLimitStr] = useState('');
+  const [editClosingDay, setEditClosingDay] = useState('20');
+  const [editDueDay, setEditDueDay] = useState('28');
+  const [editCardColor, setEditCardColor] = useState('#6366f1');
 
   // Edit Purchase State
   const [editDesc, setEditDesc] = useState('');
@@ -141,6 +151,55 @@ export const CardsPage: React.FC<CardsPageProps> = ({ onNavigateTab }) => {
     setCardName('');
     setCardIssuer('');
     setCardLimitStr('');
+  };
+
+  // Open Edit Card Modal
+  const handleOpenEditCard = (card: CreditCard) => {
+    setEditingCard(card);
+    setEditCardName(card.name);
+    setEditCardIssuer(card.issuer || '');
+    setEditCardLimitStr(String(fromCents(card.limit_cents)));
+    setEditClosingDay(String(card.closing_day));
+    setEditDueDay(String(card.due_day));
+    setEditCardColor(card.color || '#6366f1');
+    setErrorMsg('');
+  };
+
+  // Handle Save Edit Card Submit
+  const handleSaveCard = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCard) return;
+    setErrorMsg('');
+
+    const limitVal = parseFloat(editCardLimitStr.replace(',', '.'));
+    if (isNaN(limitVal) || limitVal <= 0) {
+      setErrorMsg('Informe um limite válido maior que zero.');
+      return;
+    }
+
+    if (!editCardName.trim()) {
+      setErrorMsg('Informe o nome do cartão.');
+      return;
+    }
+
+    const cDay = parseInt(editClosingDay, 10);
+    const dDay = parseInt(editDueDay, 10);
+    if (isNaN(cDay) || cDay < 1 || cDay > 31 || isNaN(dDay) || dDay < 1 || dDay > 31) {
+      setErrorMsg('Dias de fechamento e vencimento devem ser entre 1 e 31.');
+      return;
+    }
+
+    await updateCard({
+      ...editingCard,
+      name: editCardName.trim(),
+      issuer: editCardIssuer.trim() || undefined,
+      limit_cents: toCents(limitVal),
+      closing_day: cDay,
+      due_day: dDay,
+      color: editCardColor,
+    });
+
+    setEditingCard(null);
   };
 
   // Handle New Purchase Submit
@@ -328,8 +387,29 @@ export const CardsPage: React.FC<CardsPageProps> = ({ onNavigateTab }) => {
                   }}
                 >
                   <div className="card-top">
-                    <div className="card-chip" />
-                    <span className="card-issuer">{card.issuer || 'FinanFlow Card'}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <div className="card-chip" />
+                      <span className="card-issuer">{card.issuer || 'FinanFlow Card'}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenEditCard(card);
+                      }}
+                      className="btn-icon"
+                      title="Editar Limite e Cartão"
+                      aria-label="Editar Limite"
+                      style={{
+                        color: '#ffffff',
+                        backgroundColor: 'rgba(0, 0, 0, 0.35)',
+                        borderRadius: 'var(--radius-full)',
+                        padding: '0.35rem',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <Pencil size={13} />
+                    </button>
                   </div>
 
                   <div>
@@ -357,20 +437,43 @@ export const CardsPage: React.FC<CardsPageProps> = ({ onNavigateTab }) => {
           {/* Active Card Limits & Summary Details */}
           {activeCard && (
             <div className="card" style={{ marginBottom: '1.5rem' }}>
-              <div className="card-header">
-                <h3 className="card-title">
-                  <CreditCardIcon size={18} style={{ color: activeCard.color }} />
-                  <span>Detalhes do Cartão: {activeCard.name}</span>
-                </h3>
-                <span className="card-subtitle">
-                  Fechamento todo dia {activeCard.closing_day} • Vencimento todo dia {activeCard.due_day}
-                </span>
+              <div className="card-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+                <div>
+                  <h3 className="card-title">
+                    <CreditCardIcon size={18} style={{ color: activeCard.color }} />
+                    <span>Detalhes do Cartão: {activeCard.name}</span>
+                  </h3>
+                  <span className="card-subtitle">
+                    Fechamento todo dia {activeCard.closing_day} • Vencimento todo dia {activeCard.due_day}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleOpenEditCard(activeCard)}
+                  className="btn btn-secondary btn-sm"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                  title="Editar Limite do Cartão"
+                >
+                  <Pencil size={14} />
+                  <span>Editar Limite / Cartão</span>
+                </button>
               </div>
 
               {/* Limit Gauge & Breakdown */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.25rem' }}>
                 <div className="card" style={{ backgroundColor: 'var(--bg-surface-elevated)' }}>
-                  <div className="metric-title">Limite Total</div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div className="metric-title">Limite Total</div>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEditCard(activeCard)}
+                      className="btn-icon"
+                      title="Editar Limite Total"
+                      style={{ padding: '0.2rem', color: 'var(--brand-primary)' }}
+                    >
+                      <Pencil size={13} />
+                    </button>
+                  </div>
                   <div style={{ fontSize: 'var(--text-xl)', fontWeight: 800 }}>
                     {formatCurrencyBRL(activeCard.limit_cents)}
                   </div>
@@ -1124,6 +1227,143 @@ export const CardsPage: React.FC<CardsPageProps> = ({ onNavigateTab }) => {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Editar Limite e Detalhes do Cartão */}
+      {editingCard && (
+        <div className="modal-overlay" onClick={() => setEditingCard(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <CreditCardIcon size={20} style={{ color: editCardColor }} />
+                <h3 className="modal-title">Editar Limite do Cartão</h3>
+              </div>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setEditingCard(null)}
+                aria-label="Fechar"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCard} className="modal-body">
+              {errorMsg && <div className="alert-banner danger">{errorMsg}</div>}
+
+              {/* Limite Total Input */}
+              <div className="form-group">
+                <label className="form-label" htmlFor="edit-card-lim">
+                  <strong>Novo Limite Total (R$) *</strong>
+                </label>
+                <input
+                  id="edit-card-lim"
+                  type="number"
+                  step="0.01"
+                  min="1"
+                  className="form-input"
+                  placeholder="3000,00"
+                  value={editCardLimitStr}
+                  onChange={(e) => setEditCardLimitStr(e.target.value)}
+                  required
+                  style={{ fontSize: 'var(--text-base)', fontWeight: 700 }}
+                />
+                <span className="form-hint">
+                  O limite disponível e o percentual de uso serão recalculados imediatamente.
+                </span>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label" htmlFor="edit-card-name">Nome do Cartão *</label>
+                <input
+                  id="edit-card-name"
+                  type="text"
+                  className="form-input"
+                  placeholder="Ex: Nubank Roxinho, Itaú Black"
+                  value={editCardName}
+                  onChange={(e) => setEditCardName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-row form-row-2">
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-card-iss">Bandeira / Emissor (Opcional)</label>
+                  <input
+                    id="edit-card-iss"
+                    type="text"
+                    className="form-input"
+                    placeholder="Ex: Mastercard, Visa"
+                    value={editCardIssuer}
+                    onChange={(e) => setEditCardIssuer(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-card-close">Dia de Fechamento</label>
+                  <input
+                    id="edit-card-close"
+                    type="number"
+                    min="1"
+                    max="31"
+                    className="form-input"
+                    value={editClosingDay}
+                    onChange={(e) => setEditClosingDay(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="form-row form-row-2">
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-card-due">Dia de Vencimento</label>
+                  <input
+                    id="edit-card-due"
+                    type="number"
+                    min="1"
+                    max="31"
+                    className="form-input"
+                    value={editDueDay}
+                    onChange={(e) => setEditDueDay(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Cor do Cartão</label>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                    {['#6366f1', '#8b5cf6', '#ec4899', '#06b6d4', '#10b981', '#f59e0b', '#3b82f6'].map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => setEditCardColor(color)}
+                        style={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: '50%',
+                          backgroundColor: color,
+                          border: editCardColor === color ? '3px solid #ffffff' : 'none',
+                          boxShadow: 'var(--shadow-sm)',
+                          cursor: 'pointer',
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="modal-footer" style={{ margin: '1rem -1.5rem -1.5rem -1.5rem' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setEditingCard(null)}>
+                  Cancelar
+                </button>
+                <button type="submit" className="btn btn-primary">
+                  Salvar Alterações
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -63,6 +63,7 @@ interface AppContextType {
   updateTransaction: (tx: Transaction) => Promise<void>;
   deleteTransaction: (id: string) => Promise<void>;
   addCard: (card: Omit<CreditCard, 'id' | 'user_id'>) => Promise<void>;
+  updateCard: (card: CreditCard) => Promise<void>;
   addPurchase: (params: {
     cardId: string;
     description: string;
@@ -555,6 +556,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCreditCards(updated);
   };
 
+  const updateCard = async (card: CreditCard) => {
+    if (!user) return;
+    const updated = await DataRepository.saveCard(user.id, card, creditCards);
+    setCreditCards(updated);
+  };
+
   const addPurchase = async (params: {
     cardId: string;
     description: string;
@@ -919,6 +926,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateTransaction,
         deleteTransaction,
         addCard,
+        updateCard,
         addPurchase,
         updatePurchase,
         deletePurchase,
