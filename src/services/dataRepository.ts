@@ -133,6 +133,18 @@ export function saveLocalEntity<T>(userId: string, entityName: string, data: T):
   } catch (err) {
     console.error(`Failed to save ${entityName} locally:`, err);
   }
+
+  // Cross-device synchronization with FinanFlow Server Database
+  try {
+    fetch(`/api/user-data/${encodeURIComponent(userId)}/entity/${encodeURIComponent(entityName)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data }),
+    }).catch((err) => {
+      // Offline fallback: local storage holds the state
+      console.warn(`[Sync] Background sync for ${entityName} skipped or offline:`, err);
+    });
+  } catch {}
 }
 
 /**
@@ -140,6 +152,8 @@ export function saveLocalEntity<T>(userId: string, entityName: string, data: T):
  */
 export const DataRepository = {
   async loadAll(userId: string): Promise<AppDataState> {
+    const local = loadLocalState(userId);
+
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
@@ -185,11 +199,57 @@ export const DataRepository = {
           };
         }
       } catch (err) {
-        console.warn('Supabase fetch failed, falling back to secure local state:', err);
+        console.warn('Supabase fetch failed, falling back to server state:', err);
       }
     }
 
-    return loadLocalState(userId);
+    // Synchronize with FinanFlow Server Database (cross-device sync)
+    try {
+      const res = await fetch(`/api/user-data/${encodeURIComponent(userId)}/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: local }),
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          const serverState = json.data;
+          const merged: AppDataState = {
+            profile: { ...local.profile, ...(serverState.profile || {}) },
+            categories: Array.isArray(serverState.categories) && serverState.categories.length > 0 ? serverState.categories : local.categories,
+            creditCards: serverState.creditCards || local.creditCards,
+            transactions: serverState.transactions || local.transactions,
+            purchases: serverState.purchases || local.purchases,
+            installments: serverState.installments || local.installments,
+            invoices: serverState.invoices || local.invoices,
+            invoicePayments: serverState.invoicePayments || local.invoicePayments,
+            recurringRules: serverState.recurringRules || local.recurringRules,
+            recurringOccurrences: serverState.recurringOccurrences || local.recurringOccurrences,
+            budgets: serverState.budgets || local.budgets,
+          };
+
+          // Cache merged data in local storage
+          localStorage.setItem(getLocalKey(userId, 'profile'), JSON.stringify(merged.profile));
+          localStorage.setItem(getLocalKey(userId, 'categories'), JSON.stringify(merged.categories));
+          localStorage.setItem(getLocalKey(userId, 'creditCards'), JSON.stringify(merged.creditCards));
+          localStorage.setItem(getLocalKey(userId, 'transactions'), JSON.stringify(merged.transactions));
+          localStorage.setItem(getLocalKey(userId, 'purchases'), JSON.stringify(merged.purchases));
+          localStorage.setItem(getLocalKey(userId, 'installments'), JSON.stringify(merged.installments));
+          localStorage.setItem(getLocalKey(userId, 'invoices'), JSON.stringify(merged.invoices));
+          localStorage.setItem(getLocalKey(userId, 'invoicePayments'), JSON.stringify(merged.invoicePayments));
+          localStorage.setItem(getLocalKey(userId, 'recurringRules'), JSON.stringify(merged.recurringRules));
+          localStorage.setItem(getLocalKey(userId, 'recurringOccurrences'), JSON.stringify(merged.recurringOccurrences));
+          localStorage.setItem(getLocalKey(userId, 'budgets'), JSON.stringify(merged.budgets));
+
+          return merged;
+        }
+      }
+    } catch (syncErr) {
+      console.warn('[Sync] Server sync unreachable, continuing with local cache:', syncErr);
+    }
+
+    return local;
   },
 
   async saveProfile(profile: Profile): Promise<void> {

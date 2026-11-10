@@ -370,6 +370,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setUser(updatedUser);
     localStorage.setItem('finanflow_current_user', JSON.stringify(updatedUser));
 
+    // Synchronize with server database
+    try {
+      await fetch('/api/auth/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          displayName: trimmedName,
+          newPassword,
+        }),
+      });
+    } catch (err) {
+      console.warn('Server user update unreachable:', err);
+    }
+
     // Save persistent keys for future sessions
     try {
       localStorage.setItem(`finanflow_display_name_${user.id}`, nextDisplayName);
@@ -439,7 +454,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    // Local authentication fallback for instant sandbox verification
+    // Try FinanFlow server-side authentication (for cross-device access)
+    try {
+      const srvRes = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: trimmedEmail, password: pass }),
+      });
+      const srvJson = await srvRes.json();
+      if (srvRes.ok && srvJson.success && srvJson.user) {
+        const u: AuthUser = {
+          id: srvJson.user.id,
+          email: srvJson.user.email,
+          displayName: srvJson.user.displayName,
+        };
+        setUser(u);
+        localStorage.setItem('finanflow_current_user', JSON.stringify(u));
+        try {
+          localStorage.setItem(`finanflow_display_name_${u.id}`, u.displayName);
+          localStorage.setItem(`finanflow_display_name_${trimmedEmail}`, u.displayName);
+        } catch {}
+        return { success: true };
+      } else if (!srvRes.ok && srvJson.error) {
+        return { success: false, error: srvJson.error };
+      }
+    } catch (srvErr) {
+      console.warn('Server auth login unreachable, falling back to local storage:', srvErr);
+    }
+
+    // Local authentication fallback for instant offline verification
     const localUserId = `usr_${trimmedEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
     const resolvedName = getPersistedDisplayName(localUserId, trimmedEmail, trimmedEmail.split('@')[0]);
     const u: AuthUser = {
@@ -487,8 +530,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           return { success: true };
         }
       } catch (err) {
-        console.warn('Supabase sign-up error, falling back to local mode:', err);
+        console.warn('Supabase sign-up error, falling back to server mode:', err);
       }
+    }
+
+    // Try FinanFlow server-side registration (for cross-device access)
+    try {
+      const srvRes = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: trimmedEmail, password: pass, name: trimmedName }),
+      });
+      const srvJson = await srvRes.json();
+      if (srvRes.ok && srvJson.success && srvJson.user) {
+        const u: AuthUser = {
+          id: srvJson.user.id,
+          email: srvJson.user.email,
+          displayName: srvJson.user.displayName,
+        };
+        setUser(u);
+        localStorage.setItem('finanflow_current_user', JSON.stringify(u));
+        try {
+          localStorage.setItem(`finanflow_display_name_${u.id}`, trimmedName);
+          localStorage.setItem(`finanflow_display_name_${trimmedEmail}`, trimmedName);
+          const raw = localStorage.getItem('finanflow_registered_accounts');
+          const map = raw ? JSON.parse(raw) : {};
+          map[u.id] = { id: u.id, email: u.email, displayName: trimmedName };
+          map[trimmedEmail] = { id: u.id, email: u.email, displayName: trimmedName };
+          localStorage.setItem('finanflow_registered_accounts', JSON.stringify(map));
+        } catch {}
+        return { success: true };
+      } else if (!srvRes.ok && srvJson.error) {
+        return { success: false, error: srvJson.error };
+      }
+    } catch (srvErr) {
+      console.warn('Server auth register unreachable, falling back to local mode:', srvErr);
     }
 
     const localUserId = `usr_${trimmedEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;

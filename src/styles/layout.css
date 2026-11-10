@@ -253,6 +253,25 @@
   color: var(--brand-primary);
 }
 
+.header-logout-btn {
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-surface-elevated);
+  color: var(--text-secondary);
+  transition: all var(--transition-fast);
+}
+
+.header-logout-btn:hover {
+  background-color: rgba(239, 68, 68, 0.1);
+  border-color: var(--color-expense);
+  color: var(--color-expense);
+}
+
 .header-user-pill {
   display: inline-flex;
   align-items: center;
@@ -329,6 +348,12 @@
 
   .header-user-pill {
     padding: 0.3rem 0.4rem;
+  }
+
+  .header-theme-toggle,
+  .header-logout-btn {
+    width: 34px;
+    height: 34px;
   }
 
   .top-header-row-actions {

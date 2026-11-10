@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Lock, Mail, Eye, EyeOff, CheckCircle2, AlertCircle, Save, X } from 'lucide-react';
+import { User, Lock, Mail, Eye, EyeOff, CheckCircle2, AlertCircle, Save, X, LogOut } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 interface ProfileEditModalProps {
@@ -8,7 +8,7 @@ interface ProfileEditModalProps {
 }
 
 export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onClose }) => {
-  const { user, profile, updateUserCredentials } = useApp();
+  const { user, profile, updateUserCredentials, logout } = useApp();
 
   const [displayName, setDisplayName] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -247,23 +247,40 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
             </div>
           </div>
 
-          <div className="modal-footer" style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '1rem' }}>
+          <div className="modal-footer" style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={onClose}
+              onClick={async () => {
+                onClose();
+                await logout();
+              }}
               disabled={isSubmitting}
+              style={{ color: 'var(--color-expense)', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+              title="Encerrar sessão nesta conta"
             >
-              Cancelar
+              <LogOut size={16} />
+              <span>Deslogar</span>
             </button>
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={isSubmitting}
-            >
-              <Save size={16} />
-              <span>{isSubmitting ? 'Salvando...' : 'Salvar Alterações'}</span>
-            </button>
+
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={onClose}
+                disabled={isSubmitting}
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={isSubmitting}
+              >
+                <Save size={16} />
+                <span>{isSubmitting ? 'Salvando...' : 'Salvar Alterações'}</span>
+              </button>
+            </div>
           </div>
         </form>
       </div>

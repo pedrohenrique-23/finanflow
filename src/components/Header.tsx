@@ -1,5 +1,5 @@
 import React from 'react';
-import { PlusCircle, Moon, Sun, User, TrendingUp } from 'lucide-react';
+import { PlusCircle, Moon, Sun, User, TrendingUp, LogOut } from 'lucide-react';
 import { MonthPicker } from './MonthPicker';
 import { useApp } from '../context/AppContext';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -12,7 +12,7 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ activeTab, onOpenNewTx, onOpenProfileEdit }) => {
-  const { user, profile, theme, toggleTheme } = useApp();
+  const { user, profile, theme, toggleTheme, logout } = useApp();
 
   const getPageTitle = () => {
     switch (activeTab) {
@@ -75,6 +75,17 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onOpenNewTx, onOpenPr
               <span className="header-user-name">
                 {profile.display_name || user.displayName || 'Meu Perfil'}
               </span>
+            </button>
+          )}
+
+          {user && (
+            <button
+              onClick={logout}
+              className="btn-icon header-logout-btn"
+              title="Sair da conta (Deslogar)"
+              aria-label="Sair da conta"
+            >
+              <LogOut size={17} />
             </button>
           )}
         </div>

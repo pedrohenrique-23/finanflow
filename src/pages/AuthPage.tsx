@@ -160,11 +160,11 @@ export const AuthPage: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-            <Database size={14} style={{ color: isSupabaseActive ? 'var(--brand-primary)' : 'var(--color-warning)' }} />
+            <Database size={14} style={{ color: 'var(--color-income)' }} />
             <span>
               {isSupabaseActive
                 ? 'Conectado à nuvem Supabase (PostgreSQL)'
-                : 'Modo seguro local ativo com persistência integral'}
+                : 'Banco de Dados FinanFlow Ativo (Sincronizado na Nuvem Desktop & Mobile)'}
             </span>
           </div>
         </div>

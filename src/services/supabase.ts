@@ -9,6 +9,24 @@ let customKey = localStorage.getItem('finanflow_supabase_anon_key') || envKey;
 
 let supabaseInstance: SupabaseClient | null = null;
 
+// Fetch shared Supabase config from server on startup
+if (typeof window !== 'undefined') {
+  fetch('/api/supabase-config')
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data) => {
+      if (data && data.url && data.anonKey) {
+        if (!customUrl || customUrl.includes('your-project')) {
+          customUrl = data.url;
+          customKey = data.anonKey;
+          localStorage.setItem('finanflow_supabase_url', data.url);
+          localStorage.setItem('finanflow_supabase_anon_key', data.anonKey);
+          supabaseInstance = null;
+        }
+      }
+    })
+    .catch(() => {});
+}
+
 export function getSupabaseCredentials() {
   return {
     url: customUrl,
@@ -31,6 +49,15 @@ export function saveSupabaseCredentials(url: string, anonKey: string) {
     localStorage.removeItem('finanflow_supabase_anon_key');
   }
   supabaseInstance = null; // force re-instantiation
+
+  // Synchronize with server so mobile and desktop share the exact same Supabase connection
+  try {
+    fetch('/api/supabase-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: customUrl, anonKey: customKey }),
+    }).catch(() => {});
+  } catch {}
 }
 
 export function getSupabaseClient(): SupabaseClient | null {
