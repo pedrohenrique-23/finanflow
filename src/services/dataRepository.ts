@@ -127,34 +127,124 @@ export function loadLocalState(userId: string): AppDataState {
   };
 }
 
-export function saveLocalEntity<T>(userId: string, entityName: string, data: T): void {
+export function saveLocalEntity<T>(userId: string, entityName: string, data: T, email?: string): void {
   try {
     localStorage.setItem(getLocalKey(userId, entityName), JSON.stringify(data));
   } catch (err) {
     console.error(`Failed to save ${entityName} locally:`, err);
   }
 
+  const resolvedEmail = email || (() => {
+    try {
+      const cur = localStorage.getItem('finanflow_current_user');
+      return cur ? JSON.parse(cur)?.email : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+
   // Cross-device synchronization with FinanFlow Server Database
   try {
     fetch(`/api/user-data/${encodeURIComponent(userId)}/entity/${encodeURIComponent(entityName)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data }),
+      body: JSON.stringify({ data, email: resolvedEmail }),
     }).catch((err) => {
-      // Offline fallback: local storage holds the state
       console.warn(`[Sync] Background sync for ${entityName} skipped or offline:`, err);
     });
   } catch {}
 }
 
 /**
+ * Scan all local storage data created in earlier sessions and bootstrap to the server database
+ */
+export async function bootstrapLocalDataToCloud(): Promise<void> {
+  if (typeof window === 'undefined') return;
+
+  try {
+    const accounts: any[] = [];
+    let currentUser: any = null;
+    const localStores: Record<string, any> = {};
+
+    // 1. Current user
+    const curRaw = localStorage.getItem('finanflow_current_user');
+    if (curRaw) {
+      try {
+        currentUser = JSON.parse(curRaw);
+      } catch {}
+    }
+
+    // 2. Registered accounts map
+    const regRaw = localStorage.getItem('finanflow_registered_accounts');
+    if (regRaw) {
+      try {
+        const map = JSON.parse(regRaw);
+        for (const item of Object.values(map)) {
+          if (item && (item as any).email) {
+            accounts.push(item);
+          }
+        }
+      } catch {}
+    }
+
+    // 3. Collect local financial entities
+    const allUserIds = new Set<string>();
+    if (currentUser?.id) allUserIds.add(currentUser.id);
+    if (currentUser?.email) allUserIds.add(currentUser.email);
+    for (const acc of accounts) {
+      if (acc.id) allUserIds.add(acc.id);
+      if (acc.email) allUserIds.add(acc.email);
+    }
+
+    // Scan all keys in localStorage for finanflow_data_
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(STORAGE_PREFIX)) {
+        const withoutPrefix = k.substring(STORAGE_PREFIX.length);
+        const parts = withoutPrefix.split('_');
+        if (parts.length >= 2) {
+          const entity = parts[parts.length - 1];
+          const uId = parts.slice(0, parts.length - 1).join('_');
+          if (uId) allUserIds.add(uId);
+        }
+      }
+    }
+
+    for (const uId of allUserIds) {
+      const state = loadLocalState(uId);
+      if (
+        state.transactions.length > 0 ||
+        state.creditCards.length > 0 ||
+        state.profile.initial_balance_cents > 0 ||
+        state.recurringRules.length > 0
+      ) {
+        localStores[uId] = state;
+      }
+    }
+
+    // Send bootstrap package to server
+    if (accounts.length > 0 || currentUser || Object.keys(localStores).length > 0) {
+      await fetch('/api/sync/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accounts, currentUser, localStores }),
+      });
+    }
+  } catch (err) {
+    console.warn('[Sync] Bootstrap sync error:', err);
+  }
+}
+
+/**
  * Service to manage all persistent CRUD operations seamlessly
  */
 export const DataRepository = {
-  async loadAll(userId: string): Promise<AppDataState> {
+  async loadAll(userId: string, email?: string): Promise<AppDataState> {
     const local = loadLocalState(userId);
 
+    // 1. Supabase sync if credentials and tables are valid
     const supabase = getSupabaseClient();
+    let supabaseState: Partial<AppDataState> | null = null;
     if (supabase) {
       try {
         const [
@@ -183,9 +273,9 @@ export const DataRepository = {
           supabase.from('monthly_budgets').select('*').eq('user_id', userId),
         ]);
 
-        if (profData) {
-          return {
-            profile: profData,
+        if (profData || (txData && txData.length > 0)) {
+          supabaseState = {
+            profile: profData || local.profile,
             categories: catData || [],
             creditCards: cardData || [],
             transactions: txData || [],
@@ -199,16 +289,21 @@ export const DataRepository = {
           };
         }
       } catch (err) {
-        console.warn('Supabase fetch failed, falling back to server state:', err);
+        console.warn('Supabase fetch failed, continuing with server sync:', err);
       }
     }
 
-    // Synchronize with FinanFlow Server Database (cross-device sync)
+    // Merge base local with Supabase if available
+    const baseToSync: AppDataState = supabaseState
+      ? { ...local, ...supabaseState }
+      : local;
+
+    // 2. Synchronize with FinanFlow Server Database (cross-device sync)
     try {
       const res = await fetch(`/api/user-data/${encodeURIComponent(userId)}/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: local }),
+        body: JSON.stringify({ data: baseToSync, email }),
       });
 
       if (res.ok) {
@@ -216,17 +311,17 @@ export const DataRepository = {
         if (json.success && json.data) {
           const serverState = json.data;
           const merged: AppDataState = {
-            profile: { ...local.profile, ...(serverState.profile || {}) },
-            categories: Array.isArray(serverState.categories) && serverState.categories.length > 0 ? serverState.categories : local.categories,
-            creditCards: serverState.creditCards || local.creditCards,
-            transactions: serverState.transactions || local.transactions,
-            purchases: serverState.purchases || local.purchases,
-            installments: serverState.installments || local.installments,
-            invoices: serverState.invoices || local.invoices,
-            invoicePayments: serverState.invoicePayments || local.invoicePayments,
-            recurringRules: serverState.recurringRules || local.recurringRules,
-            recurringOccurrences: serverState.recurringOccurrences || local.recurringOccurrences,
-            budgets: serverState.budgets || local.budgets,
+            profile: { ...baseToSync.profile, ...(serverState.profile || {}) },
+            categories: Array.isArray(serverState.categories) && serverState.categories.length > 0 ? serverState.categories : baseToSync.categories,
+            creditCards: serverState.creditCards || baseToSync.creditCards,
+            transactions: serverState.transactions || baseToSync.transactions,
+            purchases: serverState.purchases || baseToSync.purchases,
+            installments: serverState.installments || baseToSync.installments,
+            invoices: serverState.invoices || baseToSync.invoices,
+            invoicePayments: serverState.invoicePayments || baseToSync.invoicePayments,
+            recurringRules: serverState.recurringRules || baseToSync.recurringRules,
+            recurringOccurrences: serverState.recurringOccurrences || baseToSync.recurringOccurrences,
+            budgets: serverState.budgets || baseToSync.budgets,
           };
 
           // Cache merged data in local storage
@@ -249,7 +344,7 @@ export const DataRepository = {
       console.warn('[Sync] Server sync unreachable, continuing with local cache:', syncErr);
     }
 
-    return local;
+    return baseToSync;
   },
 
   async saveProfile(profile: Profile): Promise<void> {

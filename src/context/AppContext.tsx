@@ -21,7 +21,12 @@ import {
   getTodayDateStr,
   toCents,
 } from '../domain/finance';
-import { DataRepository, loadLocalState, saveLocalEntity } from '../services/dataRepository';
+import {
+  DataRepository,
+  loadLocalState,
+  saveLocalEntity,
+  bootstrapLocalDataToCloud,
+} from '../services/dataRepository';
 import { getSupabaseClient, getSupabaseCredentials } from '../services/supabase';
 
 interface AuthUser {
@@ -184,10 +189,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
+  // On initial mount: bootstrap any local accounts & data created in earlier turns to cloud server
+  useEffect(() => {
+    bootstrapLocalDataToCloud().then(() => {
+      if (user) {
+        reloadAllData();
+      }
+    });
+  }, []);
+
   // Load all data for current user
   const reloadAllData = async () => {
     if (!user) return;
-    const data = await DataRepository.loadAll(user.id);
+    const data = await DataRepository.loadAll(user.id, user.email);
 
     if (data.profile.onboarding_completed || localStorage.getItem(`finanflow_onboarding_completed_${user.id}`) === 'true') {
       setHasCompletedOnboarding(true);
@@ -224,9 +238,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Continuous sync: reload on user change, window focus (switching tabs/devices), and every 15s
   useEffect(() => {
     reloadAllData();
-  }, [user?.id]);
+
+    if (!user) return;
+
+    const handleFocus = () => {
+      reloadAllData();
+    };
+    window.addEventListener('focus', handleFocus);
+
+    const interval = setInterval(() => {
+      reloadAllData();
+    }, 15000);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      clearInterval(interval);
+    };
+  }, [user?.id, user?.email]);
 
   // Derive Invoice records from Installments
   const derivedInvoices = useMemo(() => {
@@ -424,37 +455,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
       setUser(u);
       localStorage.setItem('finanflow_current_user', JSON.stringify(u));
+      await reloadAllData();
       return { success: true };
     }
 
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        const { data, error } = await supabase.auth.signInWithPassword({ email: trimmedEmail, password: pass });
-        if (error) {
-          return { success: false, error: error.message };
-        }
-        if (data.user) {
-          const resolvedName = getPersistedDisplayName(
-            data.user.id,
-            trimmedEmail,
-            data.user.user_metadata?.full_name || trimmedEmail.split('@')[0]
-          );
-          const u: AuthUser = {
-            id: data.user.id,
-            email: data.user.email || trimmedEmail,
-            displayName: resolvedName,
-          };
-          setUser(u);
-          localStorage.setItem('finanflow_current_user', JSON.stringify(u));
-          return { success: true };
-        }
-      } catch (err) {
-        console.warn('Supabase auth error, falling back to local mode:', err);
-      }
-    }
-
-    // Try FinanFlow server-side authentication (for cross-device access)
+    // 1. Authenticate with FinanFlow Cloud Server (authoritative across devices)
     try {
       const srvRes = await fetch('/api/auth/login', {
         method: 'POST',
@@ -473,16 +478,71 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         try {
           localStorage.setItem(`finanflow_display_name_${u.id}`, u.displayName);
           localStorage.setItem(`finanflow_display_name_${trimmedEmail}`, u.displayName);
+          const raw = localStorage.getItem('finanflow_registered_accounts');
+          const map = raw ? JSON.parse(raw) : {};
+          map[u.id] = { id: u.id, email: u.email, displayName: u.displayName };
+          map[trimmedEmail] = { id: u.id, email: u.email, displayName: u.displayName };
+          localStorage.setItem('finanflow_registered_accounts', JSON.stringify(map));
         } catch {}
+
+        // In parallel, if Supabase is active, sign in to keep Supabase session in sync
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          supabase.auth.signInWithPassword({ email: trimmedEmail, password: pass }).catch(() => {});
+        }
+
+        // Immediately load and hydrate data
+        const freshData = await DataRepository.loadAll(u.id, u.email);
+        setCategories(freshData.categories);
+        setCreditCards(freshData.creditCards);
+        setPurchases(freshData.purchases);
+        setInstallments(freshData.installments);
+        setInvoices(freshData.invoices);
+        setInvoicePayments(freshData.invoicePayments);
+        setTransactions(freshData.transactions);
+        setRecurringRules(freshData.recurringRules);
+        setRecurringOccurrences(freshData.recurringOccurrences);
+        setBudgets(freshData.budgets);
+        setProfile(freshData.profile);
         return { success: true };
       } else if (!srvRes.ok && srvJson.error) {
         return { success: false, error: srvJson.error };
       }
     } catch (srvErr) {
-      console.warn('Server auth login unreachable, falling back to local storage:', srvErr);
+      console.warn('Server auth login unreachable, checking fallback:', srvErr);
     }
 
-    // Local authentication fallback for instant offline verification
+    // 2. Supabase fallback if server was somehow unreachable
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({ email: trimmedEmail, password: pass });
+        if (error) {
+          return { success: false, error: error.message };
+        }
+        if (data.user) {
+          const canonicalId = `usr_${trimmedEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+          const resolvedName = getPersistedDisplayName(
+            canonicalId,
+            trimmedEmail,
+            data.user.user_metadata?.full_name || trimmedEmail.split('@')[0]
+          );
+          const u: AuthUser = {
+            id: canonicalId,
+            email: data.user.email || trimmedEmail,
+            displayName: resolvedName,
+          };
+          setUser(u);
+          localStorage.setItem('finanflow_current_user', JSON.stringify(u));
+          await reloadAllData();
+          return { success: true };
+        }
+      } catch (err) {
+        console.warn('Supabase auth error, falling back to local mode:', err);
+      }
+    }
+
+    // 3. Local authentication fallback for instant offline verification
     const localUserId = `usr_${trimmedEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
     const resolvedName = getPersistedDisplayName(localUserId, trimmedEmail, trimmedEmail.split('@')[0]);
     const u: AuthUser = {
@@ -492,6 +552,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setUser(u);
     localStorage.setItem('finanflow_current_user', JSON.stringify(u));
+    await reloadAllData();
     return { success: true };
   };
 
@@ -499,42 +560,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const trimmedEmail = email.trim().toLowerCase();
     const trimmedName = name?.trim() || trimmedEmail.split('@')[0];
 
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        const { data, error } = await supabase.auth.signUp({
-          email: trimmedEmail,
-          password: pass,
-          options: { data: { full_name: trimmedName } },
-        });
-        if (error) {
-          return { success: false, error: error.message };
-        }
-        if (data.user) {
-          const u: AuthUser = {
-            id: data.user.id,
-            email: data.user.email || trimmedEmail,
-            displayName: trimmedName,
-          };
-          setUser(u);
-          localStorage.setItem('finanflow_current_user', JSON.stringify(u));
-          try {
-            localStorage.setItem(`finanflow_display_name_${u.id}`, trimmedName);
-            localStorage.setItem(`finanflow_display_name_${trimmedEmail}`, trimmedName);
-            const raw = localStorage.getItem('finanflow_registered_accounts');
-            const map = raw ? JSON.parse(raw) : {};
-            map[u.id] = { id: u.id, email: u.email, displayName: trimmedName };
-            map[trimmedEmail] = { id: u.id, email: u.email, displayName: trimmedName };
-            localStorage.setItem('finanflow_registered_accounts', JSON.stringify(map));
-          } catch {}
-          return { success: true };
-        }
-      } catch (err) {
-        console.warn('Supabase sign-up error, falling back to server mode:', err);
-      }
-    }
-
-    // Try FinanFlow server-side registration (for cross-device access)
+    // 1. Try FinanFlow server-side registration (canonical cloud account)
     try {
       const srvRes = await fetch('/api/auth/register', {
         method: 'POST',
@@ -559,6 +585,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           map[trimmedEmail] = { id: u.id, email: u.email, displayName: trimmedName };
           localStorage.setItem('finanflow_registered_accounts', JSON.stringify(map));
         } catch {}
+
+        // In parallel, create account on Supabase if configured
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          supabase.auth.signUp({
+            email: trimmedEmail,
+            password: pass,
+            options: { data: { full_name: trimmedName } },
+          }).catch(() => {});
+        }
+
+        await reloadAllData();
         return { success: true };
       } else if (!srvRes.ok && srvJson.error) {
         return { success: false, error: srvJson.error };
@@ -584,6 +622,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       map[trimmedEmail] = { id: localUserId, email: trimmedEmail, displayName: trimmedName };
       localStorage.setItem('finanflow_registered_accounts', JSON.stringify(map));
     } catch {}
+    await reloadAllData();
     return { success: true };
   };
 
