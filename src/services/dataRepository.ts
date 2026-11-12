@@ -127,224 +127,442 @@ export function loadLocalState(userId: string): AppDataState {
   };
 }
 
-export function saveLocalEntity<T>(userId: string, entityName: string, data: T, email?: string): void {
+// ====================================================================
+// Sincronização com Supabase
+//
+// O localStorage é um cache local (abre rápido e funciona offline).
+// Toda gravação registra as linhas alteradas/removidas numa fila
+// persistente, que é enviada ao Supabase assim que houver sessão.
+// Ao carregar, o Supabase é a fonte da verdade.
+// ====================================================================
+
+type EntityName =
+  | 'categories'
+  | 'creditCards'
+  | 'purchases'
+  | 'installments'
+  | 'invoices'
+  | 'invoicePayments'
+  | 'transactions'
+  | 'recurringRules'
+  | 'recurringOccurrences'
+  | 'budgets';
+
+const ENTITY_TABLES: Record<EntityName, { table: string; columns: string[] }> = {
+  categories: {
+    table: 'categories',
+    columns: ['id', 'name', 'type', 'icon', 'color', 'is_default', 'is_archived', 'created_at'],
+  },
+  creditCards: {
+    table: 'credit_cards',
+    columns: ['id', 'name', 'issuer', 'limit_cents', 'closing_day', 'due_day', 'color', 'is_archived', 'created_at'],
+  },
+  purchases: {
+    table: 'credit_card_purchases',
+    columns: [
+      'id', 'card_id', 'description', 'total_amount_cents', 'purchase_date', 'category_id',
+      'installments_count', 'notes', 'created_at',
+    ],
+  },
+  installments: {
+    table: 'installments',
+    columns: [
+      'id', 'purchase_id', 'card_id', 'installment_number', 'total_installments', 'amount_cents',
+      'cycle_year_month', 'due_date', 'is_liquidated', 'invoice_id',
+    ],
+  },
+  invoices: {
+    table: 'invoices',
+    columns: [
+      'id', 'card_id', 'year_month', 'closing_date', 'due_date', 'total_amount_cents',
+      'paid_amount_cents', 'status', 'created_at',
+    ],
+  },
+  invoicePayments: {
+    table: 'invoice_payments',
+    columns: ['id', 'invoice_id', 'card_id', 'amount_cents', 'payment_date', 'notes', 'created_at'],
+  },
+  transactions: {
+    table: 'transactions',
+    columns: [
+      'id', 'description', 'amount_cents', 'type', 'category_id', 'date', 'due_date', 'payment_date',
+      'status', 'notes', 'payment_method', 'is_recurring', 'recurring_rule_id', 'origin_id',
+      'is_invoice_payment', 'created_at',
+    ],
+  },
+  recurringRules: {
+    table: 'recurring_rules',
+    columns: [
+      'id', 'description', 'amount_cents', 'type', 'category_id', 'frequency', 'day_of_month',
+      'start_date', 'end_date', 'is_active', 'created_at',
+    ],
+  },
+  recurringOccurrences: {
+    table: 'recurring_occurrences',
+    columns: [
+      'id', 'rule_id', 'year_month', 'expected_date', 'amount_cents', 'status', 'transaction_id', 'created_at',
+    ],
+  },
+  budgets: {
+    table: 'monthly_budgets',
+    columns: ['id', 'year_month', 'category_id', 'limit_cents', 'created_at'],
+  },
+};
+
+const ENTITY_NAMES = Object.keys(ENTITY_TABLES) as EntityName[];
+
+const PROFILE_COLUMNS = [
+  'display_name', 'initial_balance_cents', 'start_date', 'theme', 'timezone', 'currency', 'onboarding_completed',
+];
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Only Supabase Auth users (UUID ids) are synced; the demo account stays local. */
+export function isCloudUserId(userId: string): boolean {
+  return UUID_RE.test(userId);
+}
+
+interface PendingOps {
+  upsert: string[];
+  delete: string[];
+}
+
+interface PendingQueue {
+  entities: Partial<Record<EntityName, PendingOps>>;
+  profile?: boolean;
+}
+
+function pendingKey(userId: string) {
+  return `finanflow_pending_sync_${userId}`;
+}
+
+function readQueue(userId: string): PendingQueue {
+  try {
+    const raw = localStorage.getItem(pendingKey(userId));
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return { entities: {} };
+}
+
+function writeQueue(userId: string, queue: PendingQueue) {
+  try {
+    const empty = !queue.profile && Object.keys(queue.entities).length === 0;
+    if (empty) localStorage.removeItem(pendingKey(userId));
+    else localStorage.setItem(pendingKey(userId), JSON.stringify(queue));
+  } catch {}
+}
+
+function enqueue(userId: string, entity: EntityName | 'profile', upsertIds: string[] = [], deleteIds: string[] = []) {
+  const queue = readQueue(userId);
+  if (entity === 'profile') {
+    queue.profile = true;
+  } else {
+    const ops = queue.entities[entity] || { upsert: [], delete: [] };
+    const up = new Set(ops.upsert);
+    const del = new Set(ops.delete);
+    for (const id of upsertIds) {
+      up.add(id);
+      del.delete(id);
+    }
+    for (const id of deleteIds) {
+      del.add(id);
+      up.delete(id);
+    }
+    if (up.size > 0 || del.size > 0) {
+      queue.entities[entity] = { upsert: [...up], delete: [...del] };
+    }
+  }
+  writeQueue(userId, queue);
+}
+
+export function hasPendingSync(userId: string): boolean {
+  const q = readQueue(userId);
+  return Boolean(q.profile) || Object.keys(q.entities).length > 0;
+}
+
+function readLocalArray<T>(userId: string, entity: string): T[] {
+  try {
+    const raw = localStorage.getItem(getLocalKey(userId, entity));
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function toRow(userId: string, item: Record<string, any>, columns: string[]): Record<string, any> {
+  const row: Record<string, any> = { user_id: userId, updated_at: new Date().toISOString() };
+  for (const col of columns) {
+    if (!(col in item) || item[col] === undefined) continue;
+    const v = item[col];
+    row[col] = v === '' ? null : v;
+  }
+  return row;
+}
+
+/** Postgres returns NULL for optional fields; the app expects them to be absent. */
+function fromRow<T>(row: Record<string, any>): T {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(row)) {
+    if (v !== null) out[k] = v;
+  }
+  return out as T;
+}
+
+let flushChain: Promise<boolean> = Promise.resolve(true);
+
+/** Sends queued changes to Supabase. Resolves true when the queue is empty afterwards. */
+export function flushPendingSync(userId: string): Promise<boolean> {
+  flushChain = flushChain.then(() => doFlush(userId)).catch(() => false);
+  return flushChain;
+}
+
+async function doFlush(userId: string): Promise<boolean> {
+  if (!isCloudUserId(userId)) return true;
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (sessionData.session?.user.id !== userId) return false;
+
+  const queue = readQueue(userId);
+
+  if (queue.profile) {
+    try {
+      const raw = localStorage.getItem(getLocalKey(userId, 'profile'));
+      if (raw) {
+        const profile = JSON.parse(raw);
+        const { error } = await supabase
+          .from('profiles')
+          .upsert(toRow(userId, profile, PROFILE_COLUMNS), { onConflict: 'user_id', defaultToNull: false });
+        if (error) throw error;
+      }
+      const q = readQueue(userId);
+      delete q.profile;
+      writeQueue(userId, q);
+    } catch (err) {
+      console.warn('[Sync] Falha ao enviar perfil:', err);
+    }
+  }
+
+  for (const entity of Object.keys(queue.entities) as EntityName[]) {
+    const ops = queue.entities[entity];
+    if (!ops) continue;
+    const { table, columns } = ENTITY_TABLES[entity];
+    try {
+      if (ops.delete.length > 0) {
+        const { error } = await supabase.from(table).delete().eq('user_id', userId).in('id', ops.delete);
+        if (error) throw error;
+      }
+      if (ops.upsert.length > 0) {
+        const wanted = new Set(ops.upsert);
+        const rows = readLocalArray<Record<string, any>>(userId, entity)
+          .filter((item) => item && wanted.has(item.id))
+          .map((item) => toRow(userId, item, columns));
+        for (let i = 0; i < rows.length; i += 500) {
+          const { error } = await supabase
+            .from(table)
+            .upsert(rows.slice(i, i + 500), { onConflict: 'user_id,id', defaultToNull: false });
+          if (error) throw error;
+        }
+      }
+      // Remove only what was sent; newer changes queued meanwhile are kept.
+      const q = readQueue(userId);
+      const current = q.entities[entity];
+      if (current) {
+        const sentUp = new Set(ops.upsert);
+        const sentDel = new Set(ops.delete);
+        const rest: PendingOps = {
+          upsert: current.upsert.filter((id) => !sentUp.has(id)),
+          delete: current.delete.filter((id) => !sentDel.has(id)),
+        };
+        if (rest.upsert.length === 0 && rest.delete.length === 0) delete q.entities[entity];
+        else q.entities[entity] = rest;
+        writeQueue(userId, q);
+      }
+    } catch (err) {
+      console.warn(`[Sync] Falha ao enviar ${entity}:`, err);
+    }
+  }
+
+  return !hasPendingSync(userId);
+}
+
+export function saveLocalEntity<T>(userId: string, entityName: string, data: T): void {
+  const previous = Array.isArray(data) ? readLocalArray<any>(userId, entityName) : null;
+
   try {
     localStorage.setItem(getLocalKey(userId, entityName), JSON.stringify(data));
   } catch (err) {
     console.error(`Failed to save ${entityName} locally:`, err);
   }
 
-  const resolvedEmail = email || (() => {
-    try {
-      const cur = localStorage.getItem('finanflow_current_user');
-      return cur ? JSON.parse(cur)?.email : undefined;
-    } catch {
-      return undefined;
-    }
-  })();
+  if (!isCloudUserId(userId)) return;
 
-  // Cross-device synchronization with FinanFlow Server Database
-  try {
-    fetch(`/api/user-data/${encodeURIComponent(userId)}/entity/${encodeURIComponent(entityName)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data, email: resolvedEmail }),
-    }).catch((err) => {
-      console.warn(`[Sync] Background sync for ${entityName} skipped or offline:`, err);
-    });
-  } catch {}
+  if (entityName === 'profile') {
+    enqueue(userId, 'profile');
+  } else if (entityName in ENTITY_TABLES && Array.isArray(data) && previous) {
+    const prevById = new Map<string, string>();
+    for (const item of previous) if (item?.id) prevById.set(item.id, JSON.stringify(item));
+    const nextIds = new Set<string>();
+    const changed: string[] = [];
+    for (const item of data as any[]) {
+      if (!item?.id) continue;
+      nextIds.add(item.id);
+      if (prevById.get(item.id) !== JSON.stringify(item)) changed.push(item.id);
+    }
+    const removed = [...prevById.keys()].filter((id) => !nextIds.has(id));
+    enqueue(userId, entityName as EntityName, changed, removed);
+  } else {
+    return;
+  }
+
+  flushPendingSync(userId);
 }
 
 /**
- * Scan all local storage data created in earlier sessions and bootstrap to the server database
+ * Data created before Supabase Auth was used is stored under a legacy id
+ * ("usr_<email>"). Copy it to the Supabase user id so it can be uploaded.
  */
-export async function bootstrapLocalDataToCloud(): Promise<void> {
-  if (typeof window === 'undefined') return;
+export function adoptLegacyLocalData(newUserId: string, email: string): void {
+  const normalized = email.trim().toLowerCase();
+  const legacyIds = [`usr_${normalized.replace(/[^a-zA-Z0-9]/g, '_')}`, normalized];
+  const entities = ['profile', ...ENTITY_NAMES];
 
-  try {
-    const accounts: any[] = [];
-    let currentUser: any = null;
-    const localStores: Record<string, any> = {};
+  const hasData = (id: string) =>
+    ENTITY_NAMES.some((e) => e !== 'categories' && readLocalArray(id, e).length > 0);
 
-    // 1. Current user
-    const curRaw = localStorage.getItem('finanflow_current_user');
-    if (curRaw) {
+  if (hasData(newUserId)) return;
+
+  for (const legacyId of legacyIds) {
+    if (!hasData(legacyId)) continue;
+    for (const entity of entities) {
+      const raw = localStorage.getItem(getLocalKey(legacyId, entity));
+      if (!raw) continue;
       try {
-        currentUser = JSON.parse(curRaw);
+        const parsed = JSON.parse(raw);
+        const rewritten = Array.isArray(parsed)
+          ? parsed.map((item) => ({ ...item, user_id: newUserId }))
+          : { ...parsed, user_id: newUserId, id: `prof_${newUserId}` };
+        localStorage.setItem(getLocalKey(newUserId, entity), JSON.stringify(rewritten));
       } catch {}
     }
-
-    // 2. Registered accounts map
-    const regRaw = localStorage.getItem('finanflow_registered_accounts');
-    if (regRaw) {
-      try {
-        const map = JSON.parse(regRaw);
-        for (const item of Object.values(map)) {
-          if (item && (item as any).email) {
-            accounts.push(item);
-          }
-        }
-      } catch {}
+    if (localStorage.getItem(`finanflow_onboarding_completed_${legacyId}`) === 'true') {
+      localStorage.setItem(`finanflow_onboarding_completed_${newUserId}`, 'true');
     }
-
-    // 3. Collect local financial entities
-    const allUserIds = new Set<string>();
-    if (currentUser?.id) allUserIds.add(currentUser.id);
-    if (currentUser?.email) allUserIds.add(currentUser.email);
-    for (const acc of accounts) {
-      if (acc.id) allUserIds.add(acc.id);
-      if (acc.email) allUserIds.add(acc.email);
-    }
-
-    // Scan all keys in localStorage for finanflow_data_
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith(STORAGE_PREFIX)) {
-        const withoutPrefix = k.substring(STORAGE_PREFIX.length);
-        const parts = withoutPrefix.split('_');
-        if (parts.length >= 2) {
-          const entity = parts[parts.length - 1];
-          const uId = parts.slice(0, parts.length - 1).join('_');
-          if (uId) allUserIds.add(uId);
-        }
-      }
-    }
-
-    for (const uId of allUserIds) {
-      const state = loadLocalState(uId);
-      if (
-        state.transactions.length > 0 ||
-        state.creditCards.length > 0 ||
-        state.profile.initial_balance_cents > 0 ||
-        state.recurringRules.length > 0
-      ) {
-        localStores[uId] = state;
-      }
-    }
-
-    // Send bootstrap package to server
-    if (accounts.length > 0 || currentUser || Object.keys(localStores).length > 0) {
-      await fetch('/api/sync/bootstrap', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accounts, currentUser, localStores }),
-      });
-    }
-  } catch (err) {
-    console.warn('[Sync] Bootstrap sync error:', err);
+    return;
   }
+}
+
+function writeCache(userId: string, state: AppDataState) {
+  const entries: [string, unknown][] = [['profile', state.profile], ...ENTITY_NAMES.map((e) => [e, state[e]] as [string, unknown])];
+  for (const [entity, value] of entries) {
+    try {
+      localStorage.setItem(getLocalKey(userId, entity), JSON.stringify(value));
+    } catch {}
+  }
+}
+
+function migratedKey(userId: string) {
+  return `finanflow_cloud_merged_${userId}`;
+}
+
+
+function pickEntities(remote: Record<string, any[]>): Partial<AppDataState> {
+  const out: Record<string, any[]> = {};
+  for (const e of ENTITY_NAMES) out[e] = remote[e];
+  return out as Partial<AppDataState>;
 }
 
 /**
  * Service to manage all persistent CRUD operations seamlessly
  */
 export const DataRepository = {
-  async loadAll(userId: string, email?: string): Promise<AppDataState> {
+  async loadAll(userId: string): Promise<AppDataState> {
     const local = loadLocalState(userId);
+    if (!isCloudUserId(userId)) return local;
 
-    // 1. Supabase sync if credentials and tables are valid
     const supabase = getSupabaseClient();
-    let supabaseState: Partial<AppDataState> | null = null;
-    if (supabase) {
-      try {
-        const [
-          { data: profData },
-          { data: catData },
-          { data: cardData },
-          { data: txData },
-          { data: purchData },
-          { data: instData },
-          { data: invData },
-          { data: invPayData },
-          { data: ruleData },
-          { data: occData },
-          { data: bgtData },
-        ] = await Promise.all([
-          supabase.from('profiles').select('*').eq('user_id', userId).single(),
-          supabase.from('categories').select('*').eq('user_id', userId),
-          supabase.from('credit_cards').select('*').eq('user_id', userId),
-          supabase.from('transactions').select('*').eq('user_id', userId),
-          supabase.from('credit_card_purchases').select('*').eq('user_id', userId),
-          supabase.from('installments').select('*').eq('user_id', userId),
-          supabase.from('invoices').select('*').eq('user_id', userId),
-          supabase.from('invoice_payments').select('*').eq('user_id', userId),
-          supabase.from('recurring_rules').select('*').eq('user_id', userId),
-          supabase.from('recurring_occurrences').select('*').eq('user_id', userId),
-          supabase.from('monthly_budgets').select('*').eq('user_id', userId),
-        ]);
+    if (!supabase) return local;
 
-        if (profData || (txData && txData.length > 0)) {
-          supabaseState = {
-            profile: profData || local.profile,
-            categories: catData || [],
-            creditCards: cardData || [],
-            transactions: txData || [],
-            purchases: purchData || [],
-            installments: instData || [],
-            invoices: invData || [],
-            invoicePayments: invPayData || [],
-            recurringRules: ruleData || [],
-            recurringOccurrences: occData || [],
-            budgets: bgtData || [],
-          };
-        }
-      } catch (err) {
-        console.warn('Supabase fetch failed, continuing with server sync:', err);
-      }
-    }
-
-    // Merge base local with Supabase if available
-    const baseToSync: AppDataState = supabaseState
-      ? { ...local, ...supabaseState }
-      : local;
-
-    // 2. Synchronize with FinanFlow Server Database (cross-device sync)
     try {
-      const res = await fetch(`/api/user-data/${encodeURIComponent(userId)}/sync`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: baseToSync, email }),
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData.session?.user.id !== userId) return local;
+
+      // Primeiro acesso deste aparelho: envia tudo que existe só aqui
+      // (dados criados antes da sincronização) sem sobrescrever a nuvem.
+      const firstMerge = localStorage.getItem(migratedKey(userId)) !== 'true';
+
+      await flushPendingSync(userId);
+
+      const tables = ENTITY_NAMES.map((e) => ENTITY_TABLES[e].table);
+      const results = await Promise.all([
+        supabase.from('profiles').select('*').eq('user_id', userId).maybeSingle(),
+        ...tables.map((t) => supabase.from(t).select('*').eq('user_id', userId)),
+      ]);
+      const failed = results.find((r) => r.error);
+      if (failed?.error) throw failed.error;
+
+      const [profRes, ...entityRes] = results;
+      const remote: Record<string, any[]> = {};
+      ENTITY_NAMES.forEach((e, i) => {
+        remote[e] = ((entityRes[i].data as any[]) || []).map((r) => fromRow(r));
       });
+      const remoteProfile = profRes.data ? fromRow<Partial<Profile>>(profRes.data as any) : null;
 
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success && json.data) {
-          const serverState = json.data;
-          const merged: AppDataState = {
-            profile: { ...baseToSync.profile, ...(serverState.profile || {}) },
-            categories: Array.isArray(serverState.categories) && serverState.categories.length > 0 ? serverState.categories : baseToSync.categories,
-            creditCards: serverState.creditCards || baseToSync.creditCards,
-            transactions: serverState.transactions || baseToSync.transactions,
-            purchases: serverState.purchases || baseToSync.purchases,
-            installments: serverState.installments || baseToSync.installments,
-            invoices: serverState.invoices || baseToSync.invoices,
-            invoicePayments: serverState.invoicePayments || baseToSync.invoicePayments,
-            recurringRules: serverState.recurringRules || baseToSync.recurringRules,
-            recurringOccurrences: serverState.recurringOccurrences || baseToSync.recurringOccurrences,
-            budgets: serverState.budgets || baseToSync.budgets,
-          };
-
-          // Cache merged data in local storage
-          localStorage.setItem(getLocalKey(userId, 'profile'), JSON.stringify(merged.profile));
-          localStorage.setItem(getLocalKey(userId, 'categories'), JSON.stringify(merged.categories));
-          localStorage.setItem(getLocalKey(userId, 'creditCards'), JSON.stringify(merged.creditCards));
-          localStorage.setItem(getLocalKey(userId, 'transactions'), JSON.stringify(merged.transactions));
-          localStorage.setItem(getLocalKey(userId, 'purchases'), JSON.stringify(merged.purchases));
-          localStorage.setItem(getLocalKey(userId, 'installments'), JSON.stringify(merged.installments));
-          localStorage.setItem(getLocalKey(userId, 'invoices'), JSON.stringify(merged.invoices));
-          localStorage.setItem(getLocalKey(userId, 'invoicePayments'), JSON.stringify(merged.invoicePayments));
-          localStorage.setItem(getLocalKey(userId, 'recurringRules'), JSON.stringify(merged.recurringRules));
-          localStorage.setItem(getLocalKey(userId, 'recurringOccurrences'), JSON.stringify(merged.recurringOccurrences));
-          localStorage.setItem(getLocalKey(userId, 'budgets'), JSON.stringify(merged.budgets));
-
-          return merged;
+      if (firstMerge) {
+        let queued = false;
+        for (const e of ENTITY_NAMES) {
+          const remoteIds = new Set(remote[e].map((r) => r.id));
+          const missing = (local[e] as any[]).filter((item) => item?.id && !remoteIds.has(item.id));
+          if (missing.length > 0) {
+            enqueue(userId, e, missing.map((m) => m.id));
+            remote[e] = [...remote[e], ...missing];
+            queued = true;
+          }
+        }
+        const localIsRicher =
+          !remoteProfile ||
+          (!remoteProfile.onboarding_completed && !remoteProfile.initial_balance_cents &&
+            (local.profile.onboarding_completed || local.profile.initial_balance_cents > 0));
+        if (localIsRicher) {
+          enqueue(userId, 'profile');
+          queued = true;
+        }
+        if (queued) await flushPendingSync(userId);
+        if (!hasPendingSync(userId)) localStorage.setItem(migratedKey(userId), 'true');
+        if (localIsRicher) {
+          return this._finish(userId, { ...local, ...pickEntities(remote) });
         }
       }
-    } catch (syncErr) {
-      console.warn('[Sync] Server sync unreachable, continuing with local cache:', syncErr);
-    }
 
-    return baseToSync;
+      const merged: AppDataState = {
+        ...local,
+        ...pickEntities(remote),
+        profile: remoteProfile
+          ? { ...local.profile, ...remoteProfile, id: local.profile.id, user_id: userId }
+          : local.profile,
+      };
+      if (merged.categories.length === 0) merged.categories = local.categories;
+
+      return this._finish(userId, merged);
+    } catch (err) {
+      console.warn('[Sync] Supabase indisponível, usando cache local:', err);
+      return local;
+    }
+  },
+
+  /** Keeps local edits that are still waiting to be uploaded, then caches the result. */
+  _finish(userId: string, state: AppDataState): AppDataState {
+    const queue = readQueue(userId);
+    const fresh = loadLocalState(userId);
+    const result: AppDataState = { ...state };
+    for (const e of Object.keys(queue.entities) as EntityName[]) {
+      (result as any)[e] = fresh[e];
+    }
+    if (queue.profile) result.profile = fresh.profile;
+    writeCache(userId, result);
+    return result;
   },
 
   async saveProfile(profile: Profile): Promise<void> {
@@ -354,14 +572,6 @@ export const DataRepository = {
         localStorage.setItem(`finanflow_display_name_${profile.user_id}`, profile.display_name.trim());
       }
     } catch {}
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        await supabase.from('profiles').upsert(profile);
-      } catch (e) {
-        console.warn('Supabase profile sync error:', e);
-      }
-    }
   },
 
   async saveTransaction(userId: string, tx: Transaction, allTx: Transaction[]): Promise<Transaction[]> {
@@ -376,14 +586,6 @@ export const DataRepository = {
 
     saveLocalEntity(userId, 'transactions', updated);
 
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        await supabase.from('transactions').upsert(tx);
-      } catch (e) {
-        console.warn('Supabase transaction sync error:', e);
-      }
-    }
     return updated;
   },
 
@@ -391,14 +593,6 @@ export const DataRepository = {
     const updated = allTx.filter((t) => t.id !== txId);
     saveLocalEntity(userId, 'transactions', updated);
 
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        await supabase.from('transactions').delete().eq('id', txId);
-      } catch (e) {
-        console.warn('Supabase transaction delete error:', e);
-      }
-    }
     return updated;
   },
 
@@ -413,14 +607,6 @@ export const DataRepository = {
     }
 
     saveLocalEntity(userId, 'creditCards', updated);
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        await supabase.from('credit_cards').upsert(card);
-      } catch (e) {
-        console.warn('Supabase card sync error:', e);
-      }
-    }
     return updated;
   },
 
@@ -479,15 +665,6 @@ export const DataRepository = {
     saveLocalEntity(userId, 'purchases', updatedPurchases);
     saveLocalEntity(userId, 'installments', updatedInstallments);
 
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        await supabase.from('credit_card_purchases').insert(purchase);
-        await supabase.from('installments').insert(newInstallments);
-      } catch (e) {
-        console.warn('Supabase purchase insert error:', e);
-      }
-    }
 
     return {
       purchases: updatedPurchases,
@@ -554,16 +731,6 @@ export const DataRepository = {
     saveLocalEntity(userId, 'purchases', updatedPurchases);
     saveLocalEntity(userId, 'installments', updatedInstallments);
 
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        await supabase.from('credit_card_purchases').upsert(updatedPurchase);
-        await supabase.from('installments').delete().eq('purchase_id', purchaseId);
-        await supabase.from('installments').insert(newInstallments);
-      } catch (e) {
-        console.warn('Supabase purchase update error:', e);
-      }
-    }
 
     return {
       purchases: updatedPurchases,
@@ -585,15 +752,6 @@ export const DataRepository = {
     saveLocalEntity(userId, 'purchases', updatedPurchases);
     saveLocalEntity(userId, 'installments', updatedInstallments);
 
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        await supabase.from('installments').delete().eq('purchase_id', purchaseId);
-        await supabase.from('credit_card_purchases').delete().eq('id', purchaseId);
-      } catch (e) {
-        console.warn('Supabase purchase delete error:', e);
-      }
-    }
 
     return {
       purchases: updatedPurchases,
@@ -612,14 +770,6 @@ export const DataRepository = {
     }
 
     saveLocalEntity(userId, 'recurringRules', updated);
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        await supabase.from('recurring_rules').upsert(rule);
-      } catch (e) {
-        console.warn('Supabase recurring rule sync error:', e);
-      }
-    }
     return updated;
   },
 
@@ -636,14 +786,6 @@ export const DataRepository = {
     saveLocalEntity(userId, 'recurringRules', updatedRules);
     saveLocalEntity(userId, 'recurringOccurrences', updatedOccs);
 
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        await supabase.from('recurring_rules').delete().eq('id', ruleId);
-      } catch (e) {
-        console.warn('Supabase recurring rule delete error:', e);
-      }
-    }
     return { rules: updatedRules, occurrences: updatedOccs };
   },
 
@@ -730,23 +872,6 @@ export const DataRepository = {
     saveLocalEntity(userId, 'invoices', updatedInvoices);
     saveLocalEntity(userId, 'transactions', updatedTransactions);
 
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        await supabase.from('invoice_payments').insert(payment);
-        await supabase.from('invoices').upsert(updatedInvoice);
-        await supabase.from('transactions').insert(txPayment);
-        if (isFullyPaid) {
-          await supabase
-            .from('installments')
-            .update({ is_liquidated: true })
-            .eq('card_id', invoice.card_id)
-            .eq('cycle_year_month', invoice.year_month);
-        }
-      } catch (e) {
-        console.warn('Supabase invoice payment sync error:', e);
-      }
-    }
 
     return {
       payments: updatedPayments,

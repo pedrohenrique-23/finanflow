@@ -25,7 +25,9 @@ import {
   DataRepository,
   loadLocalState,
   saveLocalEntity,
-  bootstrapLocalDataToCloud,
+  adoptLegacyLocalData,
+  flushPendingSync,
+  isCloudUserId,
 } from '../services/dataRepository';
 import { getSupabaseClient, getSupabaseCredentials } from '../services/supabase';
 
@@ -141,7 +143,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const stored = localStorage.getItem('finanflow_current_user');
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (parsed && parsed.id && parsed.email) {
+        // Sessões antigas (ids "usr_..." do servidor local) precisam entrar de novo pelo Supabase
+        if (parsed && parsed.id && parsed.email && (isCloudUserId(parsed.id) || parsed.id === 'demo_user')) {
           const resolvedName = getPersistedDisplayName(parsed.id, parsed.email, parsed.displayName || 'Usuário');
           return { ...parsed, displayName: resolvedName };
         }
@@ -189,19 +192,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
-  // On initial mount: bootstrap any local accounts & data created in earlier turns to cloud server
+  // Valida a sessão do Supabase: se ela expirou ou foi encerrada, volta para a tela de login
   useEffect(() => {
-    bootstrapLocalDataToCloud().then(() => {
-      if (user) {
-        reloadAllData();
+    if (!user || !isCloudUserId(user.id)) return;
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session?.user.id !== user.id) {
+        localStorage.removeItem('finanflow_current_user');
+        setUser(null);
       }
     });
-  }, []);
+
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        localStorage.removeItem('finanflow_current_user');
+        setUser(null);
+      }
+    });
+    return () => sub.subscription.unsubscribe();
+  }, [user?.id]);
 
   // Load all data for current user
-  const reloadAllData = async () => {
-    if (!user) return;
-    const data = await DataRepository.loadAll(user.id, user.email);
+  const reloadAllData = async (target: AuthUser | null = user) => {
+    if (!target) return;
+    const user = target;
+    const data = await DataRepository.loadAll(user.id);
 
     if (data.profile.onboarding_completed || localStorage.getItem(`finanflow_onboarding_completed_${user.id}`) === 'true') {
       setHasCompletedOnboarding(true);
@@ -238,7 +255,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Continuous sync: reload on user change, window focus (switching tabs/devices), and every 15s
+  // Sincronização contínua: recarrega do Supabase ao trocar de usuário, ao voltar para a aba/app,
+  // ao reconectar à internet e a cada 30s
   useEffect(() => {
     reloadAllData();
 
@@ -247,14 +265,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const handleFocus = () => {
       reloadAllData();
     };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') reloadAllData();
+    };
     window.addEventListener('focus', handleFocus);
+    window.addEventListener('online', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
 
     const interval = setInterval(() => {
       reloadAllData();
-    }, 15000);
+    }, 30000);
 
     return () => {
       window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('online', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
       clearInterval(interval);
     };
   }, [user?.id, user?.email]);
@@ -401,21 +426,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setUser(updatedUser);
     localStorage.setItem('finanflow_current_user', JSON.stringify(updatedUser));
 
-    // Synchronize with server database
-    try {
-      await fetch('/api/auth/update', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.id,
-          displayName: trimmedName,
-          newPassword,
-        }),
-      });
-    } catch (err) {
-      console.warn('Server user update unreachable:', err);
-    }
-
     // Save persistent keys for future sessions
     try {
       localStorage.setItem(`finanflow_display_name_${user.id}`, nextDisplayName);
@@ -442,10 +452,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
+  const rememberAccount = (u: AuthUser) => {
+    try {
+      localStorage.setItem('finanflow_current_user', JSON.stringify(u));
+      localStorage.setItem(`finanflow_display_name_${u.id}`, u.displayName);
+      localStorage.setItem(`finanflow_display_name_${u.email.toLowerCase()}`, u.displayName);
+      const raw = localStorage.getItem('finanflow_registered_accounts');
+      const map = raw ? JSON.parse(raw) : {};
+      map[u.id] = { id: u.id, email: u.email, displayName: u.displayName };
+      localStorage.setItem('finanflow_registered_accounts', JSON.stringify(map));
+    } catch {}
+  };
+
+  const translateAuthError = (message: string): string => {
+    const m = message.toLowerCase();
+    if (m.includes('invalid login credentials')) return 'E-mail ou senha incorretos.';
+    if (m.includes('email not confirmed')) {
+      return 'Seu e-mail ainda não foi confirmado. Abra o link enviado para sua caixa de entrada e tente novamente.';
+    }
+    if (m.includes('already registered')) return 'Este e-mail já possui conta. Use a aba Entrar.';
+    if (m.includes('password should be at least')) return 'A senha deve ter no mínimo 6 caracteres.';
+    if (m.includes('rate limit')) return 'Muitas tentativas seguidas. Aguarde alguns minutos e tente novamente.';
+    return message;
+  };
+
+  const startSession = async (u: AuthUser) => {
+    // Traz para o novo id os dados que este aparelho guardou antes da sincronização com o Supabase
+    adoptLegacyLocalData(u.id, u.email);
+    rememberAccount(u);
+    setUser(u);
+    await reloadAllData(u);
+  };
+
   const login = async (email: string, pass: string): Promise<{ success: boolean; error?: string }> => {
     const trimmedEmail = email.trim().toLowerCase();
 
-    // Demo user instant bypass
+    // Conta de demonstração: fica apenas neste aparelho
     if (trimmedEmail === 'demo@finanflow.app') {
       const resolvedName = getPersistedDisplayName('demo_user', 'demo@finanflow.app', 'Pedro Silva');
       const u: AuthUser = {
@@ -455,104 +497,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
       setUser(u);
       localStorage.setItem('finanflow_current_user', JSON.stringify(u));
-      await reloadAllData();
+      await reloadAllData(u);
       return { success: true };
     }
 
-    // 1. Authenticate with FinanFlow Cloud Server (authoritative across devices)
-    try {
-      const srvRes = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: trimmedEmail, password: pass }),
-      });
-      const srvJson = await srvRes.json();
-      if (srvRes.ok && srvJson.success && srvJson.user) {
-        const u: AuthUser = {
-          id: srvJson.user.id,
-          email: srvJson.user.email,
-          displayName: srvJson.user.displayName,
-        };
-        setUser(u);
-        localStorage.setItem('finanflow_current_user', JSON.stringify(u));
-        try {
-          localStorage.setItem(`finanflow_display_name_${u.id}`, u.displayName);
-          localStorage.setItem(`finanflow_display_name_${trimmedEmail}`, u.displayName);
-          const raw = localStorage.getItem('finanflow_registered_accounts');
-          const map = raw ? JSON.parse(raw) : {};
-          map[u.id] = { id: u.id, email: u.email, displayName: u.displayName };
-          map[trimmedEmail] = { id: u.id, email: u.email, displayName: u.displayName };
-          localStorage.setItem('finanflow_registered_accounts', JSON.stringify(map));
-        } catch {}
-
-        // In parallel, if Supabase is active, sign in to keep Supabase session in sync
-        const supabase = getSupabaseClient();
-        if (supabase) {
-          supabase.auth.signInWithPassword({ email: trimmedEmail, password: pass }).catch(() => {});
-        }
-
-        // Immediately load and hydrate data
-        const freshData = await DataRepository.loadAll(u.id, u.email);
-        setCategories(freshData.categories);
-        setCreditCards(freshData.creditCards);
-        setPurchases(freshData.purchases);
-        setInstallments(freshData.installments);
-        setInvoices(freshData.invoices);
-        setInvoicePayments(freshData.invoicePayments);
-        setTransactions(freshData.transactions);
-        setRecurringRules(freshData.recurringRules);
-        setRecurringOccurrences(freshData.recurringOccurrences);
-        setBudgets(freshData.budgets);
-        setProfile(freshData.profile);
-        return { success: true };
-      } else if (!srvRes.ok && srvJson.error) {
-        return { success: false, error: srvJson.error };
-      }
-    } catch (srvErr) {
-      console.warn('Server auth login unreachable, checking fallback:', srvErr);
-    }
-
-    // 2. Supabase fallback if server was somehow unreachable
     const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        const { data, error } = await supabase.auth.signInWithPassword({ email: trimmedEmail, password: pass });
-        if (error) {
-          return { success: false, error: error.message };
-        }
-        if (data.user) {
-          const canonicalId = `usr_${trimmedEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
-          const resolvedName = getPersistedDisplayName(
-            canonicalId,
-            trimmedEmail,
-            data.user.user_metadata?.full_name || trimmedEmail.split('@')[0]
-          );
-          const u: AuthUser = {
-            id: canonicalId,
-            email: data.user.email || trimmedEmail,
-            displayName: resolvedName,
-          };
-          setUser(u);
-          localStorage.setItem('finanflow_current_user', JSON.stringify(u));
-          await reloadAllData();
-          return { success: true };
-        }
-      } catch (err) {
-        console.warn('Supabase auth error, falling back to local mode:', err);
-      }
+    if (!supabase) {
+      return {
+        success: false,
+        error: 'Banco de dados não configurado. Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.',
+      };
     }
 
-    // 3. Local authentication fallback for instant offline verification
-    const localUserId = `usr_${trimmedEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
-    const resolvedName = getPersistedDisplayName(localUserId, trimmedEmail, trimmedEmail.split('@')[0]);
+    const { data, error } = await supabase.auth.signInWithPassword({ email: trimmedEmail, password: pass });
+    if (error || !data.user) {
+      return { success: false, error: translateAuthError(error?.message || 'Falha ao autenticar.') };
+    }
+
     const u: AuthUser = {
-      id: localUserId,
-      email: trimmedEmail,
-      displayName: resolvedName,
+      id: data.user.id,
+      email: data.user.email || trimmedEmail,
+      displayName: getPersistedDisplayName(
+        data.user.id,
+        trimmedEmail,
+        data.user.user_metadata?.full_name || trimmedEmail.split('@')[0]
+      ),
     };
-    setUser(u);
-    localStorage.setItem('finanflow_current_user', JSON.stringify(u));
-    await reloadAllData();
+    await startSession(u);
     return { success: true };
   };
 
@@ -560,73 +531,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const trimmedEmail = email.trim().toLowerCase();
     const trimmedName = name?.trim() || trimmedEmail.split('@')[0];
 
-    // 1. Try FinanFlow server-side registration (canonical cloud account)
-    try {
-      const srvRes = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: trimmedEmail, password: pass, name: trimmedName }),
-      });
-      const srvJson = await srvRes.json();
-      if (srvRes.ok && srvJson.success && srvJson.user) {
-        const u: AuthUser = {
-          id: srvJson.user.id,
-          email: srvJson.user.email,
-          displayName: srvJson.user.displayName,
-        };
-        setUser(u);
-        localStorage.setItem('finanflow_current_user', JSON.stringify(u));
-        try {
-          localStorage.setItem(`finanflow_display_name_${u.id}`, trimmedName);
-          localStorage.setItem(`finanflow_display_name_${trimmedEmail}`, trimmedName);
-          const raw = localStorage.getItem('finanflow_registered_accounts');
-          const map = raw ? JSON.parse(raw) : {};
-          map[u.id] = { id: u.id, email: u.email, displayName: trimmedName };
-          map[trimmedEmail] = { id: u.id, email: u.email, displayName: trimmedName };
-          localStorage.setItem('finanflow_registered_accounts', JSON.stringify(map));
-        } catch {}
-
-        // In parallel, create account on Supabase if configured
-        const supabase = getSupabaseClient();
-        if (supabase) {
-          supabase.auth.signUp({
-            email: trimmedEmail,
-            password: pass,
-            options: { data: { full_name: trimmedName } },
-          }).catch(() => {});
-        }
-
-        await reloadAllData();
-        return { success: true };
-      } else if (!srvRes.ok && srvJson.error) {
-        return { success: false, error: srvJson.error };
-      }
-    } catch (srvErr) {
-      console.warn('Server auth register unreachable, falling back to local mode:', srvErr);
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      return {
+        success: false,
+        error: 'Banco de dados não configurado. Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.',
+      };
     }
 
-    const localUserId = `usr_${trimmedEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
-    const u: AuthUser = {
-      id: localUserId,
+    const { data, error } = await supabase.auth.signUp({
       email: trimmedEmail,
-      displayName: trimmedName,
-    };
-    setUser(u);
-    localStorage.setItem('finanflow_current_user', JSON.stringify(u));
-    try {
-      localStorage.setItem(`finanflow_display_name_${localUserId}`, trimmedName);
-      localStorage.setItem(`finanflow_display_name_${trimmedEmail}`, trimmedName);
-      const raw = localStorage.getItem('finanflow_registered_accounts');
-      const map = raw ? JSON.parse(raw) : {};
-      map[localUserId] = { id: localUserId, email: trimmedEmail, displayName: trimmedName };
-      map[trimmedEmail] = { id: localUserId, email: trimmedEmail, displayName: trimmedName };
-      localStorage.setItem('finanflow_registered_accounts', JSON.stringify(map));
-    } catch {}
-    await reloadAllData();
+      password: pass,
+      options: { data: { full_name: trimmedName } },
+    });
+    if (error) {
+      return { success: false, error: translateAuthError(error.message) };
+    }
+    // Supabase devolve um usuário sem identidades quando o e-mail já está cadastrado
+    if (data.user && data.user.identities && data.user.identities.length === 0) {
+      return { success: false, error: 'Este e-mail já possui conta. Use a aba Entrar.' };
+    }
+    if (!data.session || !data.user) {
+      return {
+        success: false,
+        error: 'Conta criada! Enviamos um link de confirmação para o seu e-mail. Confirme e depois entre pela aba Entrar.',
+      };
+    }
+
+    const u: AuthUser = { id: data.user.id, email: data.user.email || trimmedEmail, displayName: trimmedName };
+    await startSession(u);
     return { success: true };
   };
 
   const logout = async () => {
+    if (user && isCloudUserId(user.id)) {
+      await flushPendingSync(user.id);
+    }
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
