@@ -113,7 +113,7 @@
   width: 36px;
   height: 36px;
   border-radius: var(--radius-full);
-  background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  background: var(--brand-gradient);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -284,7 +284,7 @@
   width: 24px;
   height: 24px;
   border-radius: var(--radius-full);
-  background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  background: var(--brand-gradient);
   color: #ffffff;
   font-size: 0.72rem;
   font-weight: 700;

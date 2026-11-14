@@ -11,9 +11,10 @@ import {
   ArrowRight,
   Sun,
   Moon,
-  Sparkles,
   Database,
   CheckCircle,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -24,6 +25,7 @@ export const AuthPage: React.FC = () => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -57,23 +59,10 @@ export const AuthPage: React.FC = () => {
     }
   };
 
-  const handleDemoLogin = async () => {
-    setLoading(true);
-    setErrorMsg('');
-    try {
-      await login('demo@finanflow.app', 'demo123456');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setErrorMsg(`Erro ao acessar demonstração: ${msg}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="auth-page-container">
       {/* Top right theme toggle */}
-      <div style={{ position: 'absolute', top: '1.25rem', right: '1.5rem', zIndex: 20 }}>
+      <div className="auth-theme-toggle-wrap">
         <button
           onClick={toggleTheme}
           className="btn-icon"
@@ -249,22 +238,52 @@ export const AuthPage: React.FC = () => {
                 placeholder="seu.email@exemplo.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck="false"
                 required
               />
             </div>
 
             <div className="form-group">
               <label className="form-label" htmlFor="auth-main-pass">Senha</label>
-              <input
-                id="auth-main-pass"
-                type="password"
-                className="form-input"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={6}
-              />
+              <div style={{ position: 'relative' }}>
+                <input
+                  id="auth-main-pass"
+                  type={showPassword ? 'text' : 'password'}
+                  className="form-input"
+                  style={{ paddingRight: '2.5rem' }}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck="false"
+                  required
+                  minLength={6}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  style={{
+                    position: 'absolute',
+                    right: '0.75rem',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--text-muted)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: '0.25rem',
+                  }}
+                  title={showPassword ? 'Ocultar senha' : 'Ver senha'}
+                  aria-label={showPassword ? 'Ocultar senha' : 'Ver senha'}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </div>
 
             <button
@@ -277,36 +296,6 @@ export const AuthPage: React.FC = () => {
               <ArrowRight size={16} />
             </button>
           </form>
-
-          {/* Quick Demo Access */}
-          <div style={{ position: 'relative', margin: '1.75rem 0 1.25rem', textAlign: 'center' }}>
-            <hr style={{ border: 'none', borderTop: '1px solid var(--border-subtle)' }} />
-            <span
-              style={{
-                position: 'absolute',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                backgroundColor: 'var(--bg-surface)',
-                padding: '0 0.75rem',
-                fontSize: 'var(--text-xs)',
-                color: 'var(--text-muted)',
-              }}
-            >
-              ou
-            </span>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleDemoLogin}
-            className="btn btn-secondary"
-            style={{ width: '100%', height: 42 }}
-            disabled={loading}
-          >
-            <Sparkles size={16} style={{ color: 'var(--brand-primary)' }} />
-            <span>Acessar Modo Demonstração (1 Clique)</span>
-          </button>
         </div>
       </div>
     </div>

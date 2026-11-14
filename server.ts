@@ -357,10 +357,19 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
 
   // Password verification: only reject if password was explicitly set and does not match
   if (user.password && String(user.password).trim() !== String(password).trim()) {
-    return res.status(401).json({
-      success: false,
-      error: 'Senha incorreta. Verifique suas credenciais de acesso.',
-    });
+    // Check case-insensitive match (handles mobile keyboard auto-capitalizing first letter)
+    if (String(user.password).trim().toLowerCase() === String(password).trim().toLowerCase()) {
+      user.password = String(password).trim();
+      saveDatabase(db);
+    } else {
+      return res.status(401).json({
+        success: false,
+        error: 'Senha incorreta. Verifique suas credenciais de acesso ou cadastre uma nova senha na aba Criar Conta.',
+      });
+    }
+  } else if (!user.password && password) {
+    user.password = String(password).trim();
+    saveDatabase(db);
   }
 
   return res.json({

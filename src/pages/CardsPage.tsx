@@ -379,7 +379,7 @@ export const CardsPage: React.FC<CardsPageProps> = ({ onNavigateTab }) => {
                   onClick={() => setActiveCardId(card.id)}
                   className="credit-card-mockup"
                   style={{
-                    background: `linear-gradient(135deg, ${card.color} 0%, #0f172a 100%)`,
+                    background: `linear-gradient(135deg, ${card.color} 0%, #080a08 100%)`,
                     minWidth: 290,
                     cursor: 'pointer',
                     outline: isActive ? '3px solid var(--brand-primary)' : 'none',

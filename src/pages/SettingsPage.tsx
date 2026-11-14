@@ -548,9 +548,9 @@ export const SettingsPage: React.FC = () => {
               <pre
                 style={{
                   padding: '1rem',
-                  backgroundColor: '#050811',
+                  backgroundColor: '#050505',
                   borderRadius: 'var(--radius-md)',
-                  color: '#38bdf8',
+                  color: '#4ade80',
                   fontSize: '0.75rem',
                   maxHeight: 260,
                   overflowY: 'auto',
